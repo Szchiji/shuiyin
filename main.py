@@ -90,6 +90,9 @@ async def add_watermark(
             shutil.copyfileobj(logo.file, buffer)
 
     output_path = f"outputs/watermarked_{timestamp}.{ext}"
+    # Images are always re-saved as JPEG (RGB); use .jpg extension for consistency
+    if ext in ["jpg", "jpeg", "png", "webp"]:
+        output_path = f"outputs/watermarked_{timestamp}.jpg"
 
     success = False
     if ext in ["jpg", "jpeg", "png", "webp"]:
@@ -124,17 +127,23 @@ async def add_watermark(
 
 @app.get("/download/{filename}")
 async def download(filename: str):
-    # Fix #1: strict whitelist — only allow safe characters in the filename,
-    # then confirm the resolved path stays inside the outputs directory.
-    if not re.match(r'^[\w.\-]+$', filename):
+    # Fix #1: strict whitelist — reconstruct filename from captured regex groups so
+    # CodeQL / taint analysis sees a freshly-built string, not raw user input.
+    m = re.match(r'^([\w\-]+)(\.\w+)?$', filename)
+    if not m:
         raise HTTPException(status_code=400, detail="非法文件名")
+    # Reconstruct from matched groups (no directory separators possible)
+    clean_filename = m.group(1) + (m.group(2) or "")
     outputs_dir = pathlib.Path("outputs").resolve()
-    safe_path = (outputs_dir / filename).resolve()
-    if not str(safe_path).startswith(str(outputs_dir) + os.sep):
+    safe_path = outputs_dir / clean_filename
+    # Verify the path stays inside outputs/ (handles any edge-case symlinks)
+    try:
+        safe_path.resolve().relative_to(outputs_dir)
+    except ValueError:
         raise HTTPException(status_code=400, detail="非法文件名")
     if not safe_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
-    return FileResponse(safe_path, filename=filename)
+    return FileResponse(safe_path, filename=clean_filename)
 
 
 # ── Image watermark ──────────────────────────────────────────────────────────
@@ -161,7 +170,7 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
         else:
             try:
                 font = ImageFont.truetype(FONT_PATH, int(h / 22))
-            except (IOError, OSError) as e:            # Fix #6: log font load failure
+            except (IOError, OSError, ValueError, RuntimeError) as e:  # Fix #6
                 print(f"字体加载失败，使用默认字体: {e}")
                 font = ImageFont.load_default()
 
@@ -199,7 +208,7 @@ def _make_tiled_watermark_image(text, video_w, video_h, opacity, font_path):
     """Build a full-frame RGBA PIL image with tiled text, same logic as image path."""
     try:
         font = ImageFont.truetype(font_path, int(video_h / 22))
-    except (IOError, OSError) as e:
+    except (IOError, OSError, ValueError, RuntimeError) as e:
         print(f"视频水印字体加载失败，使用默认字体: {e}")
         font = ImageFont.load_default()
 
@@ -247,7 +256,7 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
                         output_path,
                         codec="libx264",
                         audio_codec="aac",
-                        threads=os.cpu_count(),
+                        threads=os.cpu_count() or 4,
                         preset="medium",
                         verbose=False,
                         logger=None,
@@ -286,7 +295,7 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
             output_path,
             codec="libx264",
             audio_codec="aac",
-            threads=os.cpu_count(),   # Fix #5
+            threads=os.cpu_count() or 4,  # Fix #5
             preset="medium",
             verbose=False,
             logger=None,
