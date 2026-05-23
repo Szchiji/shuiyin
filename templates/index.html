@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>水印小程序</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f0f2f5;
+      color: #333;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.08);
+      padding: 36px 40px;
+      width: 100%;
+      max-width: 560px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #1a1a2e;
+    }
+
+    .subtitle {
+      font-size: .9rem;
+      color: #888;
+      margin-bottom: 28px;
+    }
+
+    .field { margin-bottom: 20px; }
+
+    label {
+      display: block;
+      font-size: .85rem;
+      font-weight: 600;
+      color: #555;
+      margin-bottom: 6px;
+    }
+
+    input[type="text"],
+    input[type="file"],
+    select {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: .95rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+
+    input[type="text"]:focus,
+    select:focus { border-color: #4f8ef7; }
+
+    input[type="range"] { width: 100%; accent-color: #4f8ef7; cursor: pointer; }
+
+    .opacity-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .opacity-row input[type="range"] { flex: 1; }
+
+    .opacity-val {
+      min-width: 36px;
+      text-align: right;
+      font-weight: 600;
+      color: #4f8ef7;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+
+    .checkbox-row input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: #4f8ef7;
+      cursor: pointer;
+    }
+
+    .checkbox-row span { font-size: .95rem; }
+
+    .hint {
+      font-size: .78rem;
+      color: #aaa;
+      margin-top: 4px;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 13px;
+      background: #4f8ef7;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s, opacity .2s;
+      margin-top: 8px;
+    }
+
+    .btn:hover { background: #3a7de0; }
+    .btn:disabled { opacity: .6; cursor: not-allowed; }
+
+    /* Progress */
+    #progress-wrap {
+      display: none;
+      margin-top: 20px;
+      background: #f0f2f5;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 32px; height: 32px;
+      border: 4px solid #dde;
+      border-top-color: #4f8ef7;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+      margin-bottom: 10px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #progress-text { font-size: .9rem; color: #555; }
+
+    /* Result */
+    #result-wrap {
+      display: none;
+      margin-top: 20px;
+      background: #eaf4ea;
+      border: 1px solid #b2dfb2;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    #result-wrap .icon { font-size: 2rem; margin-bottom: 6px; }
+    #result-wrap p { margin-bottom: 12px; font-size: .95rem; color: #3a7d3a; font-weight: 600; }
+
+    .download-btn {
+      display: inline-block;
+      padding: 10px 28px;
+      background: #3a7d3a;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 8px;
+      font-size: .95rem;
+      font-weight: 600;
+      transition: background .2s;
+    }
+
+    .download-btn:hover { background: #2d612d; }
+
+    /* Error */
+    #error-wrap {
+      display: none;
+      margin-top: 20px;
+      background: #fdecea;
+      border: 1px solid #f5b7b1;
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-size: .9rem;
+      color: #c0392b;
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid #eee;
+      margin: 24px 0 20px;
+    }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>🖼️ 水印小程序</h1>
+  <p class="subtitle">支持图片（JPG / PNG / WebP）和视频（MP4 / MOV）</p>
+
+  <form id="wm-form" enctype="multipart/form-data">
+
+    <!-- 文件上传 -->
+    <div class="field">
+      <label for="file">上传文件 <span style="color:#e74c3c">*</span></label>
+      <input type="file" id="file" name="file" accept=".jpg,.jpeg,.png,.webp,.mp4,.mov" required />
+      <p class="hint">支持 jpg / png / webp / mp4 / mov，最大 200 MB</p>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- 水印文字 -->
+    <div class="field">
+      <label for="text">水印文字</label>
+      <input type="text" id="text" name="text" value="© Wei" placeholder="请输入水印文字" />
+    </div>
+
+    <!-- 水印位置 -->
+    <div class="field">
+      <label for="position">水印位置</label>
+      <select id="position" name="position">
+        <option value="右下" selected>右下角</option>
+        <option value="左上">左上角</option>
+        <option value="右上">右上角</option>
+        <option value="左下">左下角</option>
+        <option value="居中">居中</option>
+      </select>
+    </div>
+
+    <!-- 透明度 -->
+    <div class="field">
+      <label for="opacity">透明度</label>
+      <div class="opacity-row">
+        <input type="range" id="opacity" name="opacity" min="0" max="100" value="75"
+               oninput="document.getElementById('opacity-val').textContent = this.value + '%'" />
+        <span class="opacity-val" id="opacity-val">75%</span>
+      </div>
+    </div>
+
+    <!-- 平铺 -->
+    <div class="field">
+      <label>平铺水印</label>
+      <label class="checkbox-row">
+        <input type="checkbox" id="tiled" />
+        <span>全图平铺（忽略位置设置）</span>
+      </label>
+    </div>
+
+    <!-- Logo 上传 -->
+    <div class="field">
+      <label for="logo">Logo 图片（可选）</label>
+      <input type="file" id="logo" name="logo" accept=".jpg,.jpeg,.png,.webp" />
+      <p class="hint">上传后将用 Logo 替代文字水印</p>
+    </div>
+
+    <!-- 提交 -->
+    <button type="submit" class="btn" id="submit-btn">开始添加水印</button>
+  </form>
+
+  <!-- 进行中 -->
+  <div id="progress-wrap">
+    <div class="spinner"></div>
+    <p id="progress-text">正在处理，请稍候…</p>
+  </div>
+
+  <!-- 成功 -->
+  <div id="result-wrap">
+    <div class="icon">✅</div>
+    <p>水印添加成功！</p>
+    <a id="download-link" class="download-btn" href="#" download>📥 下载文件</a>
+  </div>
+
+  <!-- 失败 -->
+  <div id="error-wrap"></div>
+</div>
+
+<script>
+  const form       = document.getElementById('wm-form');
+  const submitBtn  = document.getElementById('submit-btn');
+  const progressWrap = document.getElementById('progress-wrap');
+  const resultWrap   = document.getElementById('result-wrap');
+  const errorWrap    = document.getElementById('error-wrap');
+  const downloadLink = document.getElementById('download-link');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    // Reset UI
+    resultWrap.style.display  = 'none';
+    errorWrap.style.display   = 'none';
+    progressWrap.style.display = 'block';
+    submitBtn.disabled = true;
+
+    // Build FormData — handle tiled checkbox manually (backend expects string)
+    const fd = new FormData(form);
+    const tiledChecked = document.getElementById('tiled').checked;
+    // FormData won't include unchecked checkboxes; we always set it explicitly
+    fd.delete('tiled');
+    fd.append('tiled', tiledChecked ? 'true' : 'false');
+
+    try {
+      const resp = await fetch('/add_watermark', { method: 'POST', body: fd });
+      const data = await resp.json();
+
+      progressWrap.style.display = 'none';
+
+      if (data.success) {
+        downloadLink.href     = data.download_url;
+        downloadLink.download = data.filename;
+        resultWrap.style.display = 'block';
+      } else {
+        errorWrap.textContent    = '❌ 处理失败：' + (data.error || '未知错误');
+        errorWrap.style.display  = 'block';
+      }
+    } catch (err) {
+      progressWrap.style.display = 'none';
+      errorWrap.textContent   = '❌ 请求出错：' + err.message;
+      errorWrap.style.display = 'block';
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
