@@ -91,10 +91,13 @@ async def lifespan(app: FastAPI):
     yield
     if _bot_app is not None:
         try:
-            if WEBHOOK_URL:
-                await _bot_app.bot.delete_webhook()
-            else:
+            if not WEBHOOK_URL:
                 await _bot_app.updater.stop()
+            # In webhook mode we intentionally skip delete_webhook() on
+            # shutdown.  During a rolling deploy the new instance calls
+            # set_webhook() first; if the old instance then calls
+            # delete_webhook() it would silently remove the new instance's
+            # webhook, leaving Telegram with nowhere to send updates.
             await _bot_app.stop()
             await _bot_app.shutdown()
             logger.info("Telegram 机器人已停止")
