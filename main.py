@@ -341,7 +341,7 @@ async def save_settings(
         "opacity": opacity,
         "tiled": int(tiled_bool),
         "font_size": max(1, min(15, font_size)),
-        "logo_scale": max(5, min(50, logo_scale)),
+        "logo_scale": max(5, min(100, logo_scale)),
     }
     if logo_path:
         watermark_settings["logo_path"] = logo_path
@@ -369,7 +369,7 @@ async def add_watermark(
 ):
     tiled_bool = tiled.lower() in ("true", "on", "1")  # Fix #2: parse manually
     font_size = max(1, min(15, font_size))
-    logo_scale = max(5, min(50, logo_scale))
+    logo_scale = max(5, min(100, logo_scale))
 
     # Session-based quota check for regular users
     u = _session_user(request)
@@ -560,7 +560,7 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
 
         if logo_path:
             logo = Image.open(logo_path).convert("RGBA")
-            logo_size = int(min(w, h) * max(5, min(50, logo_scale)) / 100)
+            logo_size = int(min(w, h) * max(5, min(100, logo_scale)) / 100)
             lw, lh = logo.size
             if lw <= 0 or lh <= 0:
                 lw, lh = max(1, lw), max(1, lh)
@@ -666,7 +666,7 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
         clip = VideoFileClip(input_path)
 
         if logo_path:
-            logo_h = int(clip.h * max(5, min(50, logo_scale)) / 100)
+            logo_h = int(clip.h * max(5, min(100, logo_scale)) / 100)
             logo_clip = ImageClip(logo_path).resize(height=logo_h)
             logo_clip = logo_clip.set_duration(clip.duration).set_opacity(opacity / 100)
             pos = get_position(position, clip.w, clip.h, logo_clip.w, logo_clip.h, pos_x=pos_x, pos_y=pos_y)
@@ -752,7 +752,7 @@ def get_position(pos_type, w, h, item_w, item_h, pos_x=None, pos_y=None):
         x = int(w * pos_x / 100) - item_w // 2
         y = int(h * pos_y / 100) - item_h // 2
         return (max(0, min(w - item_w, x)), max(0, min(h - item_h, y)))
-    m = 40
+    m = max(15, int(min(w, h) * 0.03))
     if pos_type == "左上":
         return (m, m)
     if pos_type == "右上":

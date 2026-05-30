@@ -385,7 +385,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data == "set_logo_scale":
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(f"{v}%", callback_data=f"logo_scale_{v}") for v in [10, 15, 20, 25]],
-            [InlineKeyboardButton(f"{v}%", callback_data=f"logo_scale_{v}") for v in [30, 35, 40, 50]],
+            [InlineKeyboardButton(f"{v}%", callback_data=f"logo_scale_{v}") for v in [30, 40, 50, 60]],
+            [InlineKeyboardButton(f"{v}%", callback_data=f"logo_scale_{v}") for v in [70, 80, 90, 100]],
         ])
         await query.edit_message_text("📐 请选择图片水印大小（占图片短边的百分比）：", reply_markup=kb)
 
