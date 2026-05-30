@@ -202,7 +202,7 @@ async def telegram_webhook(token: str, request: Request):
 async def login_page(request: Request):
     if _session_user(request):
         return RedirectResponse("/dashboard", status_code=302)
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return templates.TemplateResponse(request, "login.html", {"error": None})
 
 
 @app.post("/login", response_class=HTMLResponse)
@@ -212,7 +212,7 @@ async def login_post(
     credential: str = Form(...),
 ):
     if not _is_valid_telegram_id(user_id):
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Telegram ID 格式错误"})
+        return templates.TemplateResponse(request, "login.html", {"error": "Telegram ID 格式错误"})
 
     uid = int(user_id.strip())
 
@@ -222,12 +222,12 @@ async def login_post(
             _db.ensure_user(uid)
             request.session["user_id"] = uid
             return RedirectResponse("/admin", status_code=302)
-        return templates.TemplateResponse("login.html", {"request": request, "error": "管理员密码错误"})
+        return templates.TemplateResponse(request, "login.html", {"error": "管理员密码错误"})
 
     # Regular / member login via web token
     u = _db.get_user(uid)
     if not u or not u.get("web_token") or u["web_token"] != credential.strip():
-        return templates.TemplateResponse("login.html", {"request": request, "error": "令牌无效，请在 Telegram 机器人发送 /webtoken 获取"})
+        return templates.TemplateResponse(request, "login.html", {"error": "令牌无效，请在 Telegram 机器人发送 /webtoken 获取"})
 
     request.session["user_id"] = uid
     return RedirectResponse("/dashboard", status_code=302)
@@ -259,8 +259,7 @@ async def dashboard(request: Request):
     u = _session_user(request)
     s = _db.get_watermark_settings(u["user_id"])
     used, limit = _db.get_daily_usage(u["user_id"])
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "dashboard.html", {
         "user": u,
         "settings": s,
         "used": used,
@@ -416,8 +415,7 @@ async def download(filename: str):
 async def admin_home(request: Request):
     stats = _db.get_stats()
     sys_settings = _db.get_system_settings()
-    return templates.TemplateResponse("admin.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "admin.html", {
         "user": _session_user(request),
         "stats": stats,
         "sys_settings": sys_settings,
@@ -440,8 +438,7 @@ async def admin_users(request: Request, page: int = 1, search: str = ""):
             and u["member_until"] < today
         )
     pages = max(1, (total + 19) // 20)
-    return templates.TemplateResponse("admin.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "admin.html", {
         "user": _session_user(request),
         "users": users,
         "total": total,
@@ -478,8 +475,7 @@ async def admin_revoke_member(request: Request, target_id: int = Form(...)):
 @_require_admin
 async def admin_settings_page(request: Request):
     sys_settings = _db.get_system_settings()
-    return templates.TemplateResponse("admin.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "admin.html", {
         "user": _session_user(request),
         "sys_settings": sys_settings,
         "tab": "settings",
