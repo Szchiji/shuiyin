@@ -439,7 +439,10 @@ const logoInput        = document.getElementById('logo');
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 
-// Preset snap positions: center of watermark as % of image dimensions
+// Edge padding: keep watermark at least 2% from image boundary
+const MIN_POS = 2, MAX_POS = 98;
+// Preset snap positions: center as % of image dimensions
+// (12% ≈ 88% correspond roughly to a 40 px margin on a 320 px dimension)
 const SNAP = {
   '右下': [88, 88], '左上': [12, 12],
   '右上': [88, 12], '左下': [12, 88], '居中': [50, 50],
@@ -533,33 +536,33 @@ previewContainer.addEventListener('click', (e) => {
   if (wmDrag.contains(e.target) || tiledCheck.checked) return;
   const cr = previewContainer.getBoundingClientRect();
   const ir = getImageRect();
-  const pctX = Math.max(2, Math.min(98, (e.clientX - cr.left  - ir.x) / ir.w * 100));
-  const pctY = Math.max(2, Math.min(98, (e.clientY - cr.top   - ir.y) / ir.h * 100));
+  const pctX = Math.max(MIN_POS, Math.min(MAX_POS, (e.clientX - cr.left  - ir.x) / ir.w * 100));
+  const pctY = Math.max(MIN_POS, Math.min(MAX_POS, (e.clientY - cr.top   - ir.y) / ir.h * 100));
   placeDragAt(pctX, pctY);
 });
 
 // ── Drag the watermark label ────────────────────────────────────────────────
-let _dragging = false;
+let isDragging = false;
 
-wmDrag.addEventListener('mousedown',  (e) => { e.preventDefault(); e.stopPropagation(); _dragging = true; });
-wmDrag.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); _dragging = true; }, { passive: false });
+wmDrag.addEventListener('mousedown',  (e) => { e.preventDefault(); e.stopPropagation(); isDragging = true; });
+wmDrag.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); isDragging = true; }, { passive: false });
 
-function _applyDrag(clientX, clientY) {
+function applyDrag(clientX, clientY) {
   const cr = previewContainer.getBoundingClientRect();
   const ir = getImageRect();
-  const pctX = Math.max(2, Math.min(98, (clientX - cr.left - ir.x) / ir.w * 100));
-  const pctY = Math.max(2, Math.min(98, (clientY - cr.top  - ir.y) / ir.h * 100));
+  const pctX = Math.max(MIN_POS, Math.min(MAX_POS, (clientX - cr.left - ir.x) / ir.w * 100));
+  const pctY = Math.max(MIN_POS, Math.min(MAX_POS, (clientY - cr.top  - ir.y) / ir.h * 100));
   placeDragAt(pctX, pctY);
 }
 
 document.addEventListener('mousemove', (e) => {
-  if (_dragging) _applyDrag(e.clientX, e.clientY);
+  if (isDragging) applyDrag(e.clientX, e.clientY);
 });
 document.addEventListener('touchmove', (e) => {
-  if (_dragging) { e.preventDefault(); _applyDrag(e.touches[0].clientX, e.touches[0].clientY); }
+  if (isDragging) { e.preventDefault(); applyDrag(e.touches[0].clientX, e.touches[0].clientY); }
 }, { passive: false });
-document.addEventListener('mouseup',  () => { _dragging = false; });
-document.addEventListener('touchend', () => { _dragging = false; });
+document.addEventListener('mouseup',  () => { isDragging = false; });
+document.addEventListener('touchend', () => { isDragging = false; });
 </script>
 </body>
 </html>

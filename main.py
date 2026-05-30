@@ -319,9 +319,12 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
                     "居中": ("center", "center"),
                 }
                 if pos_x is not None and pos_y is not None:
-                    txt_clip = txt_clip.set_position(
-                        (int(clip.w * pos_x / 100), int(clip.h * pos_y / 100))
-                    )
+                    txt_w = txt_clip.w or 0
+                    txt_h = txt_clip.h or 0
+                    txt_clip = txt_clip.set_position((
+                        max(0, int(clip.w * pos_x / 100) - txt_w // 2),
+                        max(0, int(clip.h * pos_y / 100) - txt_h // 2),
+                    ))
                 else:
                     txt_clip = txt_clip.set_position(pos_map.get(position, ("right", "bottom")))
                 final = CompositeVideoClip([clip, txt_clip])
