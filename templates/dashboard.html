@@ -338,6 +338,17 @@
           <p class="hint">上传后将用 Logo 替代文字水印</p>
         </div>
 
+        <!-- Logo 大小（仅 Logo 模式显示） -->
+        <div class="field" id="logo-scale-field" style="display:none;">
+          <label>图片水印大小</label>
+          <div class="opacity-row">
+            <input type="range" id="logo_scale" name="logo_scale" min="5" max="50" value="{{ settings.logo_scale or 20 }}"
+                   oninput="document.getElementById('logo-scale-val').textContent=this.value+'%'" />
+            <span class="opacity-val" id="logo-scale-val">{{ settings.logo_scale or 20 }}%</span>
+          </div>
+          <p class="hint">占图片短边的百分比（5%–50%）</p>
+        </div>
+
         <input type="hidden" id="pos_x" name="pos_x" value="" />
         <input type="hidden" id="pos_y" name="pos_y" value="" />
 
@@ -378,6 +389,17 @@
           {% if settings.logo_path %}
           <p class="hint">当前已有 Logo：{{ settings.logo_path.split('/')[-1] }}</p>
           {% endif %}
+        </div>
+
+        <!-- Logo 大小（仅 logo 类型显示） -->
+        <div class="field" id="tmpl-logo-scale-field" style="display:none;">
+          <label>默认图片水印大小</label>
+          <div class="opacity-row">
+            <input type="range" name="logo_scale" min="5" max="50" value="{{ settings.logo_scale or 20 }}"
+                   oninput="this.nextElementSibling.textContent=this.value+'%'" />
+            <span class="opacity-val">{{ settings.logo_scale or 20 }}%</span>
+          </div>
+          <p class="hint">占图片短边的百分比（5%–50%）</p>
         </div>
 
         <div class="field">
@@ -434,6 +456,7 @@ function toggleLogoField() {
   const v = document.getElementById('tmpl-type').value;
   document.getElementById('tmpl-text-field').style.display = v === 'text' ? '' : 'none';
   document.getElementById('tmpl-logo-field').style.display = v === 'logo' ? '' : 'none';
+  document.getElementById('tmpl-logo-scale-field').style.display = v === 'logo' ? '' : 'none';
 }
 toggleLogoField();
 
@@ -531,9 +554,11 @@ function snapToPreset(name) {
   placeDragAt(c[0], c[1]);
 }
 function updateWmLabel() {
-  wmDrag.textContent = (logoInput.files && logoInput.files[0])
+  const hasLogo = logoInput.files && logoInput.files[0];
+  wmDrag.textContent = hasLogo
     ? '🖼 Logo'
     : (textInput.value.trim() || '水印');
+  document.getElementById('logo-scale-field').style.display = hasLogo ? '' : 'none';
 }
 function updateTiledUI() {
   const on = tiledCheck.checked;

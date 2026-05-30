@@ -318,6 +318,7 @@ async def save_settings(
     opacity: int = Form(75),
     tiled: str = Form("false"),
     font_size: int = Form(5),
+    logo_scale: int = Form(20),
     logo: UploadFile = File(None),
 ):
     u = _session_user(request)
@@ -340,6 +341,7 @@ async def save_settings(
         "opacity": opacity,
         "tiled": int(tiled_bool),
         "font_size": max(1, min(15, font_size)),
+        "logo_scale": max(5, min(50, logo_scale)),
     }
     if logo_path:
         watermark_settings["logo_path"] = logo_path
@@ -360,12 +362,14 @@ async def add_watermark(
     opacity: int = Form(75),
     tiled: str = Form("false"),          # Fix #2: receive as string
     font_size: int = Form(5),
+    logo_scale: int = Form(20),
     logo: UploadFile = File(None),
     pos_x: float | None = Form(None),  # watermark centre X as % of image width (0–100)
     pos_y: float | None = Form(None),  # watermark centre Y as % of image height (0–100)
 ):
     tiled_bool = tiled.lower() in ("true", "on", "1")  # Fix #2: parse manually
     font_size = max(1, min(15, font_size))
+    logo_scale = max(5, min(50, logo_scale))
 
     # Session-based quota check for regular users
     u = _session_user(request)
@@ -404,7 +408,7 @@ async def add_watermark(
     if ext in ["jpg", "jpeg", "png", "webp"]:
         success = add_watermark_to_image(
             input_path, output_path, text, position, opacity, tiled_bool, logo_path,
-            pos_x=pos_x, pos_y=pos_y, font_size=font_size,
+            pos_x=pos_x, pos_y=pos_y, font_size=font_size, logo_scale=logo_scale,
         )
     elif ext in ["mp4", "mov"]:
         # Fix #7: run blocking video work in a thread-pool executor
@@ -412,7 +416,7 @@ async def add_watermark(
         success = await loop.run_in_executor(
             None,
             partial(add_watermark_to_video,
-                    input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size),
+                    input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size, logo_scale),
         )
 
     # Clean up uploaded originals immediately
@@ -549,14 +553,14 @@ async def admin_settings_save(
 
 # ── Image watermark ──────────────────────────────────────────────────────────
 
-def add_watermark_to_image(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5):
+def add_watermark_to_image(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20):
     try:
         img = Image.open(input_path).convert("RGBA")
         w, h = img.size
 
         if logo_path:
             logo = Image.open(logo_path).convert("RGBA")
-            logo_size = int(min(w, h) * 0.18)
+            logo_size = int(min(w, h) * max(5, min(50, logo_scale)) / 100)
             logo = logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
             logo = ImageEnhance.Brightness(logo).enhance(opacity / 100)
 
@@ -648,12 +652,13 @@ def _make_tiled_watermark_image(text, video_w, video_h, opacity, font_path, font
     return layer
 
 
-def add_watermark_to_video(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5):
+def add_watermark_to_video(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20):
     try:
         clip = VideoFileClip(input_path)
 
         if logo_path:
-            logo_clip = ImageClip(logo_path).resize(height=clip.h // 8)
+            logo_h = int(clip.h * max(5, min(50, logo_scale)) / 100)
+            logo_clip = ImageClip(logo_path).resize(height=logo_h)
             logo_clip = logo_clip.set_duration(clip.duration).set_opacity(opacity / 100)
             pos = get_position(position, clip.w, clip.h, logo_clip.w, logo_clip.h, pos_x=pos_x, pos_y=pos_y)
             logo_clip = logo_clip.set_position(pos)

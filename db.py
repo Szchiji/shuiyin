@@ -49,19 +49,26 @@ def init_db() -> None:
                 raise
         conn.execute("""
             CREATE TABLE IF NOT EXISTS watermark_settings (
-                user_id   INTEGER PRIMARY KEY,
-                wm_type   TEXT    NOT NULL DEFAULT 'text',
-                text      TEXT    NOT NULL DEFAULT '© Wei',
-                logo_path TEXT,
-                position  TEXT    NOT NULL DEFAULT '右下',
-                opacity   INTEGER NOT NULL DEFAULT 75,
-                tiled     INTEGER NOT NULL DEFAULT 0,
-                font_size INTEGER NOT NULL DEFAULT 5
+                user_id    INTEGER PRIMARY KEY,
+                wm_type    TEXT    NOT NULL DEFAULT 'text',
+                text       TEXT    NOT NULL DEFAULT '© Wei',
+                logo_path  TEXT,
+                position   TEXT    NOT NULL DEFAULT '右下',
+                opacity    INTEGER NOT NULL DEFAULT 75,
+                tiled      INTEGER NOT NULL DEFAULT 0,
+                font_size  INTEGER NOT NULL DEFAULT 5,
+                logo_scale INTEGER NOT NULL DEFAULT 20
             )
         """)
         # Migrate existing installations: add font_size column if missing.
         try:
             conn.execute("ALTER TABLE watermark_settings ADD COLUMN font_size INTEGER NOT NULL DEFAULT 5")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+        # Migrate existing installations: add logo_scale column if missing.
+        try:
+            conn.execute("ALTER TABLE watermark_settings ADD COLUMN logo_scale INTEGER NOT NULL DEFAULT 20")
         except sqlite3.OperationalError as e:
             if "duplicate column name" not in str(e).lower():
                 raise
@@ -189,6 +196,7 @@ _DEFAULTS: dict = {
     "opacity": 75,
     "tiled": 0,
     "font_size": 5,
+    "logo_scale": 20,
 }
 
 
@@ -207,8 +215,8 @@ def save_watermark_settings(user_id: int, **kwargs) -> None:
         conn.execute(
             """
             INSERT OR REPLACE INTO watermark_settings
-                (user_id, wm_type, text, logo_path, position, opacity, tiled, font_size)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (user_id, wm_type, text, logo_path, position, opacity, tiled, font_size, logo_scale)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -219,6 +227,7 @@ def save_watermark_settings(user_id: int, **kwargs) -> None:
                 current["opacity"],
                 current["tiled"],
                 current.get("font_size", 5),
+                current.get("logo_scale", 20),
             ),
         )
 
