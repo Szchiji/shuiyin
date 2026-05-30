@@ -4,3 +4,4 @@ pillow
 moviepy
 python-multipart
 aiofiles
+jinja2
