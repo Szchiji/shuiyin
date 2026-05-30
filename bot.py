@@ -68,6 +68,7 @@ def _wm_summary(s: dict) -> str:
     lines = ["⚙️ 当前水印模板：", f"• 类型：{type_label}"]
     if s["wm_type"] == "logo":
         lines.append(f"• 图片：{'✅ 已上传' if logo_ok else '❌ 尚未上传'}")
+        lines.append(f"• 大小：{s.get('logo_scale', 20)}%")
     else:
         lines.append(f"• 文字：{s['text']}")
     lines += [
@@ -79,12 +80,17 @@ def _wm_summary(s: dict) -> str:
 
 
 def _settings_kb(s: dict) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+    rows = [
         [InlineKeyboardButton("🎨 修改水印模板", callback_data="set_template")],
         [InlineKeyboardButton(f"📍 位置: {s['position']}", callback_data="set_position")],
+    ]
+    if s.get("wm_type") == "logo":
+        rows.append([InlineKeyboardButton(f"📐 大小: {s.get('logo_scale', 20)}%", callback_data="set_logo_scale")])
+    rows += [
         [InlineKeyboardButton(f"🔆 透明度: {s['opacity']}%", callback_data="set_opacity")],
         [InlineKeyboardButton(f"🔲 平铺: {'开' if s['tiled'] else '关'}", callback_data="toggle_tiled")],
-    ])
+    ]
+    return InlineKeyboardMarkup(rows)
 
 
 # ── /start ────────────────────────────────────────────────────────────────────
@@ -376,6 +382,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             reply_markup=_settings_kb(s),
         )
 
+    elif data == "set_logo_scale":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"{v}%", callback_data=f"logo_scale_{v}") for v in [10, 15, 20, 25]],
+            [InlineKeyboardButton(f"{v}%", callback_data=f"logo_scale_{v}") for v in [30, 35, 40, 50]],
+        ])
+        await query.edit_message_text("📐 请选择图片水印大小（占图片短边的百分比）：", reply_markup=kb)
+
+    elif data.startswith("logo_scale_"):
+        new_scale = int(data.split("_")[2])
+        db.save_watermark_settings(user_id, logo_scale=new_scale)
+        s = db.get_watermark_settings(user_id)
+        await query.edit_message_text(
+            f"✅ 图片水印大小已设为：{new_scale}%\n\n{_wm_summary(s)}",
+            reply_markup=_settings_kb(s),
+        )
+
 
 # ── Text handler ──────────────────────────────────────────────────────────────
 
@@ -518,6 +540,7 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     add_watermark_to_video,
                     input_path, output_path, text,
                     s["position"], s["opacity"], bool(s["tiled"]), logo_path,
+                    None, None, s.get("font_size", 5), s.get("logo_scale", 20),
                 )
             else:
                 success = await loop.run_in_executor(
@@ -525,6 +548,7 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     add_watermark_to_image,
                     input_path, output_path, text,
                     s["position"], s["opacity"], bool(s["tiled"]), logo_path,
+                    None, None, s.get("font_size", 5), s.get("logo_scale", 20),
                 )
 
             if not success:

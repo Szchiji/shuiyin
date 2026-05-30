@@ -9,13 +9,18 @@ import time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime
-from functools import wraps
+from functools import partial, wraps
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+
+# MoviePy 1.x references PIL.Image.ANTIALIAS which was removed in Pillow 10.
+if not hasattr(Image, "ANTIALIAS"):
+    Image.ANTIALIAS = Image.LANCZOS  # type: ignore[attr-defined]
+
 from moviepy.editor import CompositeVideoClip, ImageClip, VideoFileClip
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -312,6 +317,8 @@ async def save_settings(
     position: str = Form("右下"),
     opacity: int = Form(75),
     tiled: str = Form("false"),
+    font_size: int = Form(5),
+    logo_scale: int = Form(20),
     logo: UploadFile = File(None),
 ):
     u = _session_user(request)
@@ -333,6 +340,8 @@ async def save_settings(
         "position": position,
         "opacity": opacity,
         "tiled": int(tiled_bool),
+        "font_size": max(1, min(15, font_size)),
+        "logo_scale": max(5, min(50, logo_scale)),
     }
     if logo_path:
         watermark_settings["logo_path"] = logo_path
@@ -352,11 +361,15 @@ async def add_watermark(
     position: str = Form("右下"),
     opacity: int = Form(75),
     tiled: str = Form("false"),          # Fix #2: receive as string
+    font_size: int = Form(5),
+    logo_scale: int = Form(20),
     logo: UploadFile = File(None),
     pos_x: float | None = Form(None),  # watermark centre X as % of image width (0–100)
     pos_y: float | None = Form(None),  # watermark centre Y as % of image height (0–100)
 ):
     tiled_bool = tiled.lower() in ("true", "on", "1")  # Fix #2: parse manually
+    font_size = max(1, min(15, font_size))
+    logo_scale = max(5, min(50, logo_scale))
 
     # Session-based quota check for regular users
     u = _session_user(request)
@@ -395,15 +408,15 @@ async def add_watermark(
     if ext in ["jpg", "jpeg", "png", "webp"]:
         success = add_watermark_to_image(
             input_path, output_path, text, position, opacity, tiled_bool, logo_path,
-            pos_x=pos_x, pos_y=pos_y,
+            pos_x=pos_x, pos_y=pos_y, font_size=font_size, logo_scale=logo_scale,
         )
     elif ext in ["mp4", "mov"]:
         # Fix #7: run blocking video work in a thread-pool executor
         loop = asyncio.get_event_loop()
         success = await loop.run_in_executor(
             None,
-            add_watermark_to_video,
-            input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y,
+            partial(add_watermark_to_video,
+                    input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size, logo_scale),
         )
 
     # Clean up uploaded originals immediately
@@ -540,14 +553,14 @@ async def admin_settings_save(
 
 # ── Image watermark ──────────────────────────────────────────────────────────
 
-def add_watermark_to_image(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None):
+def add_watermark_to_image(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20):
     try:
         img = Image.open(input_path).convert("RGBA")
         w, h = img.size
 
         if logo_path:
             logo = Image.open(logo_path).convert("RGBA")
-            logo_size = int(min(w, h) * 0.18)
+            logo_size = int(min(w, h) * max(5, min(50, logo_scale)) / 100)
             logo = logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
             logo = ImageEnhance.Brightness(logo).enhance(opacity / 100)
 
@@ -560,8 +573,9 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
                 pos = get_position(position, w, h, logo_size, logo_size, pos_x=pos_x, pos_y=pos_y)
                 img.paste(logo, pos, logo)
         else:
+            px_size = max(12, int(h * font_size / 100))
             try:
-                font = ImageFont.truetype(FONT_PATH, int(h / 22))
+                font = ImageFont.truetype(FONT_PATH, px_size)
             except (IOError, OSError, ValueError, RuntimeError) as e:  # Fix #6
                 print(f"字体加载失败，使用默认字体: {e}")
                 font = ImageFont.load_default()
@@ -596,10 +610,11 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
 
 # ── Video watermark ──────────────────────────────────────────────────────────
 
-def _make_positioned_watermark_image(text, video_w, video_h, opacity, font_path, position, pos_x=None, pos_y=None):
+def _make_positioned_watermark_image(text, video_w, video_h, opacity, font_path, position, pos_x=None, pos_y=None, font_size=5):
     """Build a full-frame RGBA PIL image with text at the specified position."""
+    px_size = max(12, int(video_h * font_size / 100))
     try:
-        font = ImageFont.truetype(font_path, int(video_h / 22))
+        font = ImageFont.truetype(font_path, px_size)
     except (IOError, OSError, ValueError, RuntimeError) as e:
         print(f"视频水印字体加载失败，使用默认字体: {e}")
         font = ImageFont.load_default()
@@ -615,10 +630,11 @@ def _make_positioned_watermark_image(text, video_w, video_h, opacity, font_path,
     return layer
 
 
-def _make_tiled_watermark_image(text, video_w, video_h, opacity, font_path):
+def _make_tiled_watermark_image(text, video_w, video_h, opacity, font_path, font_size=5):
     """Build a full-frame RGBA PIL image with tiled text, same logic as image path."""
+    px_size = max(12, int(video_h * font_size / 100))
     try:
-        font = ImageFont.truetype(font_path, int(video_h / 22))
+        font = ImageFont.truetype(font_path, px_size)
     except (IOError, OSError, ValueError, RuntimeError) as e:
         print(f"视频水印字体加载失败，使用默认字体: {e}")
         font = ImageFont.load_default()
@@ -636,12 +652,13 @@ def _make_tiled_watermark_image(text, video_w, video_h, opacity, font_path):
     return layer
 
 
-def add_watermark_to_video(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None):
+def add_watermark_to_video(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20):
     try:
         clip = VideoFileClip(input_path)
 
         if logo_path:
-            logo_clip = ImageClip(logo_path).resize(height=clip.h // 8)
+            logo_h = int(clip.h * max(5, min(50, logo_scale)) / 100)
+            logo_clip = ImageClip(logo_path).resize(height=logo_h)
             logo_clip = logo_clip.set_duration(clip.duration).set_opacity(opacity / 100)
             pos = get_position(position, clip.w, clip.h, logo_clip.w, logo_clip.h, pos_x=pos_x, pos_y=pos_y)
             logo_clip = logo_clip.set_position(pos)
@@ -650,7 +667,7 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
             if tiled:
                 # Fix #3: PIL-generated tiled overlay, consistent with image path
                 overlay_img = _make_tiled_watermark_image(
-                    text, clip.w, clip.h, opacity, FONT_PATH
+                    text, clip.w, clip.h, opacity, FONT_PATH, font_size=font_size
                 )
                 # Use a cross-platform temp file; clean it up after writing the video
                 tmp_fd, tmp_overlay = tempfile.mkstemp(suffix=".png")
@@ -678,7 +695,7 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
                 return True
             else:
                 overlay_img = _make_positioned_watermark_image(
-                    text, clip.w, clip.h, opacity, FONT_PATH, position, pos_x=pos_x, pos_y=pos_y
+                    text, clip.w, clip.h, opacity, FONT_PATH, position, pos_x=pos_x, pos_y=pos_y, font_size=font_size
                 )
                 tmp_fd, tmp_overlay = tempfile.mkstemp(suffix=".png")
                 os.close(tmp_fd)
@@ -731,10 +748,14 @@ def get_position(pos_type, w, h, item_w, item_h, pos_x=None, pos_y=None):
         return (m, m)
     if pos_type == "右上":
         return (w - item_w - m, m)
+    if pos_type == "中上":
+        return ((w - item_w) // 2, m)
     if pos_type == "左下":
         return (m, h - item_h - m)
     if pos_type == "右下":
         return (w - item_w - m, h - item_h - m)
+    if pos_type == "中下":
+        return ((w - item_w) // 2, h - item_h - m)
     if pos_type == "居中":
         return ((w - item_w) // 2, (h - item_h) // 2)
     return (w - item_w - m, h - item_h - m)

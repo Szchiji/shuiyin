@@ -338,6 +338,17 @@
       <p class="hint">上传后将用 Logo 替代文字水印</p>
     </div>
 
+    <!-- Logo 大小（仅 Logo 模式显示） -->
+    <div class="field" id="logo-scale-field" style="display:none;">
+      <label for="logo_scale">图片水印大小</label>
+      <div class="opacity-row">
+        <input type="range" id="logo_scale" name="logo_scale" min="5" max="50" value="20"
+               oninput="document.getElementById('logo-scale-val').textContent = this.value + '%'" />
+        <span class="opacity-val" id="logo-scale-val">20%</span>
+      </div>
+      <p class="hint">占图片短边的百分比（5%–50%）</p>
+    </div>
+
     <!-- Hidden: custom drag position (set by JS, image only) -->
     <input type="hidden" id="pos_x" name="pos_x" value="" />
     <input type="hidden" id="pos_y" name="pos_y" value="" />
@@ -485,6 +496,7 @@ function snapToPreset(name) {
 function updateWmLabel() {
   const hasLogo = logoInput.files && logoInput.files[0];
   wmDrag.textContent = hasLogo ? '🖼 Logo' : (textInput.value.trim() || '水印');
+  document.getElementById('logo-scale-field').style.display = hasLogo ? '' : 'none';
 }
 
 function updateTiledUI() {
