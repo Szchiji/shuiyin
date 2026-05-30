@@ -94,11 +94,15 @@ _db.init_db()
 # ── Auth helpers ──────────────────────────────────────────────────────────────
 
 def _is_valid_telegram_id(value: str) -> bool:
-    """Return True if *value* is a valid Telegram user ID (positive or negative integer)."""
+    """Return True if *value* looks like a Telegram user ID.
+
+    Telegram user IDs are positive integers; bot/group IDs may be negative.
+    Accepting a leading '-' covers both cases.
+    """
     return value.strip().lstrip("-").isdigit()
 
 
-
+def _session_user(request: Request) -> dict | None:
     """Return the current session's user dict, or None if not logged in."""
     user_id = request.session.get("user_id")
     if not user_id:
@@ -236,7 +240,13 @@ async def save_settings(
         with open(logo_path, "wb") as f:
             shutil.copyfileobj(logo.file, f)
 
-    watermark_settings: dict = dict(wm_type=wm_type, text=text, position=position, opacity=opacity, tiled=int(tiled_bool))
+    watermark_settings: dict = {
+        "wm_type": wm_type,
+        "text": text,
+        "position": position,
+        "opacity": opacity,
+        "tiled": int(tiled_bool),
+    }
     if logo_path:
         watermark_settings["logo_path"] = logo_path
     _db.save_watermark_settings(uid, **watermark_settings)

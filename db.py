@@ -39,7 +39,9 @@ def init_db() -> None:
                 web_token     TEXT
             )
         """)
-        # Migrate existing installations: add web_token column if missing
+        # Migrate existing installations: add web_token column if missing.
+        # SQLite raises OperationalError with "duplicate column name" when the
+        # column already exists; re-raise for any other unexpected error.
         try:
             conn.execute("ALTER TABLE users ADD COLUMN web_token TEXT")
         except sqlite3.OperationalError as e:

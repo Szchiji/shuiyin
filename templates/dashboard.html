@@ -574,8 +574,15 @@ function applyDrag(clientX, clientY) {
   placeDragAt(pctX, pctY);
 }
 
-document.addEventListener('mousemove', (e) => { if (isDragging) applyDrag(e.clientX, e.clientY); });
-document.addEventListener('touchmove', (e) => { if (isDragging) { e.preventDefault(); applyDrag(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: false });
+document.addEventListener('mousemove', (e) => {
+  if (isDragging) applyDrag(e.clientX, e.clientY);
+});
+document.addEventListener('touchmove', (e) => {
+  if (isDragging) {
+    e.preventDefault();
+    applyDrag(e.touches[0].clientX, e.touches[0].clientY);
+  }
+}, { passive: false });
 document.addEventListener('mouseup',  () => { isDragging = false; });
 document.addEventListener('touchend', () => { isDragging = false; });
 </script>
