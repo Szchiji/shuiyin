@@ -83,11 +83,13 @@ def _settings_kb(s: dict) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("🎨 修改水印模板", callback_data="set_template")],
         [InlineKeyboardButton(f"📍 位置: {s['position']}", callback_data="set_position")],
+    ]
+    if s.get("wm_type") == "logo":
+        rows.append([InlineKeyboardButton(f"📐 大小: {s.get('logo_scale', 20)}%", callback_data="set_logo_scale")])
+    rows += [
         [InlineKeyboardButton(f"🔆 透明度: {s['opacity']}%", callback_data="set_opacity")],
         [InlineKeyboardButton(f"🔲 平铺: {'开' if s['tiled'] else '关'}", callback_data="toggle_tiled")],
     ]
-    if s.get("wm_type") == "logo":
-        rows.insert(2, [InlineKeyboardButton(f"📐 大小: {s.get('logo_scale', 20)}%", callback_data="set_logo_scale")])
     return InlineKeyboardMarkup(rows)
 
 
