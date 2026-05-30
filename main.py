@@ -666,7 +666,7 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
         clip = VideoFileClip(input_path)
 
         if logo_path:
-            logo_h = int(clip.h * max(5, min(100, logo_scale)) / 100)
+            logo_h = int(min(clip.w, clip.h) * max(5, min(100, logo_scale)) / 100)
             logo_clip = ImageClip(logo_path).resize(height=logo_h)
             logo_clip = logo_clip.set_duration(clip.duration).set_opacity(opacity / 100)
             pos = get_position(position, clip.w, clip.h, logo_clip.w, logo_clip.h, pos_x=pos_x, pos_y=pos_y)
