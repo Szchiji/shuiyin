@@ -300,7 +300,7 @@
         <div class="field" id="position-field">
           <label>水印位置</label>
           <select id="position" name="position">
-            {% for p, l in [('右下','右下角'),('左上','左上角'),('右上','右上角'),('左下','左下角'),('居中','居中')] %}
+            {% for p, l in [('右下','右下角'),('左上','左上角'),('右上','右上角'),('左下','左下角'),('中上','中上'),('中下','中下'),('居中','居中')] %}
             <option value="{{ p }}" {% if settings.position == p %}selected{% endif %}>{{ l }}</option>
             {% endfor %}
           </select>
@@ -312,6 +312,15 @@
             <input type="range" id="opacity" name="opacity" min="0" max="100" value="{{ settings.opacity or 75 }}"
                    oninput="document.getElementById('opacity-val').textContent=this.value+'%'" />
             <span class="opacity-val" id="opacity-val">{{ settings.opacity or 75 }}%</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>水印大小（占图高比例）</label>
+          <div class="opacity-row">
+            <input type="range" id="font_size" name="font_size" min="1" max="15" value="{{ settings.font_size or 5 }}"
+                   oninput="document.getElementById('font-size-val').textContent=this.value+'%'" />
+            <span class="opacity-val" id="font-size-val">{{ settings.font_size or 5 }}%</span>
           </div>
         </div>
 
@@ -374,7 +383,7 @@
         <div class="field">
           <label>默认水印位置</label>
           <select name="position">
-            {% for p, l in [('右下','右下角'),('左上','左上角'),('右上','右上角'),('左下','左下角'),('居中','居中')] %}
+            {% for p, l in [('右下','右下角'),('左上','左上角'),('右上','右上角'),('左下','左下角'),('中上','中上'),('中下','中下'),('居中','居中')] %}
             <option value="{{ p }}" {% if settings.position == p %}selected{% endif %}>{{ l }}</option>
             {% endfor %}
           </select>
@@ -386,6 +395,15 @@
             <input type="range" name="opacity" min="0" max="100" value="{{ settings.opacity or 75 }}"
                    oninput="this.nextElementSibling.textContent=this.value+'%'" />
             <span class="opacity-val">{{ settings.opacity or 75 }}%</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>默认水印大小（占图高比例）</label>
+          <div class="opacity-row">
+            <input type="range" name="font_size" min="1" max="15" value="{{ settings.font_size or 5 }}"
+                   oninput="this.nextElementSibling.textContent=this.value+'%'" />
+            <span class="opacity-val">{{ settings.font_size or 5 }}%</span>
           </div>
         </div>
 
@@ -487,7 +505,7 @@ const logoInput = document.getElementById('logo');
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 const MIN_POS = 2, MAX_POS = 98;
-const SNAP = { '右下': [88, 88], '左上': [12, 12], '右上': [88, 12], '左下': [12, 88], '居中': [50, 50] };
+const SNAP = { '右下': [88, 88], '左上': [12, 12], '右上': [88, 12], '左下': [12, 88], '中上': [50, 12], '中下': [50, 88], '居中': [50, 50] };
 
 function getImageRect() {
   const cw = previewContainer.clientWidth, ch = previewContainer.clientHeight;

@@ -55,9 +55,16 @@ def init_db() -> None:
                 logo_path TEXT,
                 position  TEXT    NOT NULL DEFAULT '右下',
                 opacity   INTEGER NOT NULL DEFAULT 75,
-                tiled     INTEGER NOT NULL DEFAULT 0
+                tiled     INTEGER NOT NULL DEFAULT 0,
+                font_size INTEGER NOT NULL DEFAULT 5
             )
         """)
+        # Migrate existing installations: add font_size column if missing.
+        try:
+            conn.execute("ALTER TABLE watermark_settings ADD COLUMN font_size INTEGER NOT NULL DEFAULT 5")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
         conn.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (
                 key   TEXT PRIMARY KEY,
@@ -181,6 +188,7 @@ _DEFAULTS: dict = {
     "position": "右下",
     "opacity": 75,
     "tiled": 0,
+    "font_size": 5,
 }
 
 
@@ -199,8 +207,8 @@ def save_watermark_settings(user_id: int, **kwargs) -> None:
         conn.execute(
             """
             INSERT OR REPLACE INTO watermark_settings
-                (user_id, wm_type, text, logo_path, position, opacity, tiled)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (user_id, wm_type, text, logo_path, position, opacity, tiled, font_size)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -210,6 +218,7 @@ def save_watermark_settings(user_id: int, **kwargs) -> None:
                 current["position"],
                 current["opacity"],
                 current["tiled"],
+                current.get("font_size", 5),
             ),
         )
 

@@ -332,7 +332,7 @@
         <div class="field">
           <label>默认水印位置</label>
           <select name="default_position">
-            {% for p, l in [('右下','右下角'),('左上','左上角'),('右上','右上角'),('左下','左下角'),('居中','居中')] %}
+            {% for p, l in [('右下','右下角'),('左上','左上角'),('右上','右上角'),('左下','左下角'),('中上','中上'),('中下','中下'),('居中','居中')] %}
             <option value="{{ p }}" {% if sys_settings.default_position == p %}selected{% endif %}>{{ l }}</option>
             {% endfor %}
           </select>
