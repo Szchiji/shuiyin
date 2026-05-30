@@ -16,6 +16,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+
+# MoviePy 1.x references PIL.Image.ANTIALIAS which was removed in Pillow 10.
+if not hasattr(Image, "ANTIALIAS"):
+    Image.ANTIALIAS = Image.LANCZOS  # type: ignore[attr-defined]
+
 from moviepy.editor import CompositeVideoClip, ImageClip, VideoFileClip
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
