@@ -205,8 +205,8 @@
     {% elif tab == 'users' %}
     <h1 class="page-title">👥 用户管理</h1>
 
-    {% if request.query_params.get('msg') %}
-    <div class="alert alert-success">✅ {{ request.query_params.get('msg') }}</div>
+    {% if flash %}
+    <div class="alert alert-success">✅ {{ flash }}</div>
     {% endif %}
 
     <!-- Search -->
@@ -284,7 +284,7 @@
                     </div>
                   </form>
                   {% else %}
-                  <form method="post" action="/admin/members/revoke" style="display:inline;" onsubmit="return confirm('确认撤销 {{ u.user_id }} 的会员资格？')">
+                  <form method="post" action="/admin/members/revoke" style="display:inline;" onsubmit="return confirmRevoke(this)">
                     <input type="hidden" name="target_id" value="{{ u.user_id }}" />
                     <button type="submit" class="btn btn-danger btn-sm">撤销会员</button>
                   </form>
@@ -369,5 +369,11 @@
 
   </main>
 </div>
+<script>
+function confirmRevoke(form) {
+  const tid = form.querySelector('input[name="target_id"]').value;
+  return confirm('确认撤销用户 ' + tid + ' 的会员资格？');
+}
+</script>
 </body>
 </html>

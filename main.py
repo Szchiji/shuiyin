@@ -26,7 +26,14 @@ import db as _db
 logger = logging.getLogger(__name__)
 
 # ── Env config ────────────────────────────────────────────────────────────────
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+if not SECRET_KEY:
+    import secrets as _secrets
+    SECRET_KEY = _secrets.token_hex(32)
+    logger.warning(
+        "SECRET_KEY 环境变量未设置，已生成随机密钥——重启后所有 session 将失效。"
+        "生产环境请设置固定的 SECRET_KEY。"
+    )
 WEB_ADMIN_PASSWORD = os.getenv("WEB_ADMIN_PASSWORD", "")
 
 ADMIN_IDS: set[int] = {
@@ -354,6 +361,7 @@ async def admin_home(request: Request):
 @app.get("/admin/users", response_class=HTMLResponse)
 @_require_admin
 async def admin_users(request: Request, page: int = 1, search: str = ""):
+    flash = request.session.pop("flash", None)
     users, total = _db.list_users(page=page, limit=20, search=search)
     today = datetime.now().date().isoformat()
     # Annotate effective role
@@ -373,6 +381,7 @@ async def admin_users(request: Request, page: int = 1, search: str = ""):
         "page": page,
         "pages": pages,
         "search": search,
+        "flash": flash,
         "tab": "users",
     })
 
@@ -386,14 +395,16 @@ async def admin_add_member(
 ):
     _db.ensure_user(target_id)
     until = _db.add_member(target_id, days)
-    return RedirectResponse(f"/admin/users?msg=已为用户+{target_id}+授权+{days}+天会员，到期：{until}", status_code=302)
+    request.session["flash"] = f"已为用户 {target_id} 授权 {days} 天会员，到期：{until}"
+    return RedirectResponse("/admin/users", status_code=302)
 
 
 @app.post("/admin/members/revoke")
 @_require_admin
 async def admin_revoke_member(request: Request, target_id: int = Form(...)):
     _db.revoke_member(target_id)
-    return RedirectResponse(f"/admin/users?msg=已撤销用户+{target_id}+的会员资格", status_code=302)
+    request.session["flash"] = f"已撤销用户 {target_id} 的会员资格"
+    return RedirectResponse("/admin/users", status_code=302)
 
 
 @app.get("/admin/settings", response_class=HTMLResponse)
