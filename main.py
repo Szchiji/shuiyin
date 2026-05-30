@@ -8,18 +8,37 @@ import tempfile
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
+from functools import wraps
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 from moviepy.editor import CompositeVideoClip, ImageClip, VideoFileClip
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response
 
+import db as _db
+
 logger = logging.getLogger(__name__)
+
+# ── Env config ────────────────────────────────────────────────────────────────
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+if not SECRET_KEY:
+    import secrets as _secrets
+    SECRET_KEY = _secrets.token_hex(32)
+    logger.error(
+        "SECRET_KEY 环境变量未设置，已生成随机密钥——重启后所有 session 将失效。"
+        "生产环境请设置固定的 SECRET_KEY。"
+    )
+WEB_ADMIN_PASSWORD = os.getenv("WEB_ADMIN_PASSWORD", "")
+
+ADMIN_IDS: set[int] = {
+    int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()
+}
 
 # ── Upload size limit middleware (200 MB) ────────────────────────────────────
 MAX_UPLOAD_SIZE = 200 * 1024 * 1024  # 200 MB
@@ -59,6 +78,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="水印小程序", lifespan=lifespan)
 app.add_middleware(LimitUploadSizeMiddleware)
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, https_only=False)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
@@ -66,6 +86,53 @@ for d in ["uploads", "outputs", "fonts", "logos", "user_logos"]:
     os.makedirs(d, exist_ok=True)
 
 FONT_PATH = "fonts/simhei.ttf"
+
+# Ensure DB is initialised on startup even when bot is not running
+_db.init_db()
+
+
+# ── Auth helpers ──────────────────────────────────────────────────────────────
+
+def _is_valid_telegram_id(value: str) -> bool:
+    """Return True if *value* looks like a Telegram user ID.
+
+    Telegram user IDs are positive integers; bot/group IDs may be negative.
+    Accepting a leading '-' covers both cases.
+    """
+    return value.strip().lstrip("-").isdigit()
+
+
+def _session_user(request: Request) -> dict | None:
+    """Return the current session's user dict, or None if not logged in."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return None
+    u = _db.get_user(int(user_id))
+    if not u:
+        return None
+    u["role"] = _db.get_effective_role(u["user_id"], ADMIN_IDS)
+    return u
+
+
+def _require_login(func):
+    """Decorator: redirect to /login if not authenticated."""
+    @wraps(func)
+    async def wrapper(request: Request, *args, **kwargs):
+        if not _session_user(request):
+            return RedirectResponse("/login", status_code=302)
+        return await func(request, *args, **kwargs)
+    return wrapper
+
+
+def _require_admin(func):
+    """Decorator: 403 if not an admin session."""
+    @wraps(func)
+    async def wrapper(request: Request, *args, **kwargs):
+        u = _session_user(request)
+        if not u or u["role"] != "admin":
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+        return await func(request, *args, **kwargs)
+    return wrapper
 
 
 # ── Background cleanup ───────────────────────────────────────────────────────
@@ -77,15 +144,121 @@ def cleanup_file(path: str, delay: int = 300):
         os.remove(path)
 
 
-# ── Routes ───────────────────────────────────────────────────────────────────
+# ── Auth routes ───────────────────────────────────────────────────────────────
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    if _session_user(request):
+        return RedirectResponse("/dashboard", status_code=302)
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_post(
+    request: Request,
+    user_id: str = Form(...),
+    credential: str = Form(...),
+):
+    if not _is_valid_telegram_id(user_id):
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Telegram ID 格式错误"})
+
+    uid = int(user_id.strip())
+
+    # Admin login via password
+    if uid in ADMIN_IDS:
+        if WEB_ADMIN_PASSWORD and credential.strip() == WEB_ADMIN_PASSWORD:
+            _db.ensure_user(uid)
+            request.session["user_id"] = uid
+            return RedirectResponse("/admin", status_code=302)
+        return templates.TemplateResponse("login.html", {"request": request, "error": "管理员密码错误"})
+
+    # Regular / member login via web token
+    u = _db.get_user(uid)
+    if not u or not u.get("web_token") or u["web_token"] != credential.strip():
+        return templates.TemplateResponse("login.html", {"request": request, "error": "令牌无效，请在 Telegram 机器人发送 /webtoken 获取"})
+
+    request.session["user_id"] = uid
+    return RedirectResponse("/dashboard", status_code=302)
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/login", status_code=302)
+
+
+# ── Home redirect ─────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    u = _session_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=302)
+    if u["role"] == "admin":
+        return RedirectResponse("/admin", status_code=302)
+    return RedirectResponse("/dashboard", status_code=302)
+
+
+# ── User dashboard ────────────────────────────────────────────────────────────
+
+@app.get("/dashboard", response_class=HTMLResponse)
+@_require_login
+async def dashboard(request: Request):
+    u = _session_user(request)
+    s = _db.get_watermark_settings(u["user_id"])
+    used, limit = _db.get_daily_usage(u["user_id"])
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "user": u,
+        "settings": s,
+        "used": used,
+        "limit": limit,
+    })
+
+
+@app.post("/save_settings")
+@_require_login
+async def save_settings(
+    request: Request,
+    wm_type: str = Form("text"),
+    text: str = Form("© Wei"),
+    position: str = Form("右下"),
+    opacity: int = Form(75),
+    tiled: str = Form("false"),
+    logo: UploadFile = File(None),
+):
+    u = _session_user(request)
+    uid = u["user_id"]
+    tiled_bool = tiled.lower() in ("true", "on", "1")
+
+    logo_path = None
+    if logo and logo.filename:
+        safe_logo = pathlib.Path(logo.filename).name
+        ext = safe_logo.rsplit(".", 1)[-1].lower() if "." in safe_logo else "png"
+        logo_path = f"user_logos/{uid}.{ext}"
+        os.makedirs("user_logos", exist_ok=True)
+        with open(logo_path, "wb") as f:
+            shutil.copyfileobj(logo.file, f)
+
+    watermark_settings: dict = {
+        "wm_type": wm_type,
+        "text": text,
+        "position": position,
+        "opacity": opacity,
+        "tiled": int(tiled_bool),
+    }
+    if logo_path:
+        watermark_settings["logo_path"] = logo_path
+    _db.save_watermark_settings(uid, **watermark_settings)
+    return RedirectResponse("/dashboard?saved=1", status_code=302)
+
+
+# ── Watermark endpoint (session-aware) ────────────────────────────────────────
 
 
 @app.post("/add_watermark")
 async def add_watermark(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     text: str = Form("© Wei"),
@@ -93,8 +266,17 @@ async def add_watermark(
     opacity: int = Form(75),
     tiled: str = Form("false"),          # Fix #2: receive as string
     logo: UploadFile = File(None),
+    pos_x: float | None = Form(None),  # watermark centre X as % of image width (0–100)
+    pos_y: float | None = Form(None),  # watermark centre Y as % of image height (0–100)
 ):
     tiled_bool = tiled.lower() in ("true", "on", "1")  # Fix #2: parse manually
+
+    # Session-based quota check for regular users
+    u = _session_user(request)
+    if u and u["role"] == "regular":
+        allowed, _ = _db.check_and_increment_usage(u["user_id"])
+        if not allowed:
+            raise HTTPException(status_code=429, detail="今日使用次数已达上限")
 
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     # Sanitize filenames to prevent path-traversal in upload directories
@@ -125,7 +307,8 @@ async def add_watermark(
     success = False
     if ext in ["jpg", "jpeg", "png", "webp"]:
         success = add_watermark_to_image(
-            input_path, output_path, text, position, opacity, tiled_bool, logo_path
+            input_path, output_path, text, position, opacity, tiled_bool, logo_path,
+            pos_x=pos_x, pos_y=pos_y,
         )
     elif ext in ["mp4", "mov"]:
         # Fix #7: run blocking video work in a thread-pool executor
@@ -133,7 +316,7 @@ async def add_watermark(
         success = await loop.run_in_executor(
             None,
             add_watermark_to_video,
-            input_path, output_path, text, position, opacity, tiled_bool, logo_path,
+            input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y,
         )
 
     # Clean up uploaded originals immediately
@@ -174,9 +357,106 @@ async def download(filename: str):
     return FileResponse(safe_path, filename=clean_filename)
 
 
+# ── Admin routes ──────────────────────────────────────────────────────────────
+
+@app.get("/admin", response_class=HTMLResponse)
+@_require_admin
+async def admin_home(request: Request):
+    stats = _db.get_stats()
+    sys_settings = _db.get_system_settings()
+    return templates.TemplateResponse("admin.html", {
+        "request": request,
+        "user": _session_user(request),
+        "stats": stats,
+        "sys_settings": sys_settings,
+        "tab": "overview",
+    })
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+@_require_admin
+async def admin_users(request: Request, page: int = 1, search: str = ""):
+    flash = request.session.pop("flash", None)
+    users, total = _db.list_users(page=page, limit=20, search=search)
+    today = datetime.now().date().isoformat()
+    # Annotate effective role
+    for u in users:
+        u["effective_role"] = _db.get_effective_role(u["user_id"], ADMIN_IDS)
+        u["member_expired"] = (
+            u["role"] == "member"
+            and u.get("member_until")
+            and u["member_until"] < today
+        )
+    pages = max(1, (total + 19) // 20)
+    return templates.TemplateResponse("admin.html", {
+        "request": request,
+        "user": _session_user(request),
+        "users": users,
+        "total": total,
+        "page": page,
+        "pages": pages,
+        "search": search,
+        "flash": flash,
+        "tab": "users",
+    })
+
+
+@app.post("/admin/members/add")
+@_require_admin
+async def admin_add_member(
+    request: Request,
+    target_id: int = Form(...),
+    days: int = Form(...),
+):
+    _db.ensure_user(target_id)
+    until = _db.add_member(target_id, days)
+    request.session["flash"] = f"已为用户 {target_id} 授权 {days} 天会员，到期：{until}"
+    return RedirectResponse("/admin/users", status_code=302)
+
+
+@app.post("/admin/members/revoke")
+@_require_admin
+async def admin_revoke_member(request: Request, target_id: int = Form(...)):
+    _db.revoke_member(target_id)
+    request.session["flash"] = f"已撤销用户 {target_id} 的会员资格"
+    return RedirectResponse("/admin/users", status_code=302)
+
+
+@app.get("/admin/settings", response_class=HTMLResponse)
+@_require_admin
+async def admin_settings_page(request: Request):
+    sys_settings = _db.get_system_settings()
+    return templates.TemplateResponse("admin.html", {
+        "request": request,
+        "user": _session_user(request),
+        "sys_settings": sys_settings,
+        "tab": "settings",
+    })
+
+
+@app.post("/admin/settings")
+@_require_admin
+async def admin_settings_save(
+    request: Request,
+    default_text: str = Form("© Wei"),
+    default_position: str = Form("右下"),
+    default_opacity: int = Form(75),
+    default_tiled: str = Form("0"),
+    daily_limit: int = Form(3),
+):
+    _db.save_system_settings(
+        default_text=default_text,
+        default_position=default_position,
+        default_opacity=default_opacity,
+        default_tiled="1" if default_tiled in ("1", "true", "on") else "0",
+        daily_limit=daily_limit,
+    )
+    return RedirectResponse("/admin/settings?saved=1", status_code=302)
+
+
 # ── Image watermark ──────────────────────────────────────────────────────────
 
-def add_watermark_to_image(input_path, output_path, text, position, opacity, tiled, logo_path=None):
+def add_watermark_to_image(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None):
     try:
         img = Image.open(input_path).convert("RGBA")
         w, h = img.size
@@ -193,7 +473,7 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
                     for y in range(0, h, step):
                         img.paste(logo, (x, y), logo)
             else:
-                pos = get_position(position, w, h, logo_size, logo_size)
+                pos = get_position(position, w, h, logo_size, logo_size, pos_x=pos_x, pos_y=pos_y)
                 img.paste(logo, pos, logo)
         else:
             try:
@@ -218,7 +498,7 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
                 draw = ImageDraw.Draw(img)
                 bbox = draw.textbbox((0, 0), text, font=font)
                 tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                pos = get_position(position, w, h, tw, th)
+                pos = get_position(position, w, h, tw, th, pos_x=pos_x, pos_y=pos_y)
                 alpha = int(255 * opacity / 100)
                 draw.text((pos[0] + 2, pos[1] + 2), text, fill=(0, 0, 0, alpha), font=font)
                 draw.text(pos, text, fill=(255, 255, 255, alpha), font=font)
@@ -253,14 +533,14 @@ def _make_tiled_watermark_image(text, video_w, video_h, opacity, font_path):
     return layer
 
 
-def add_watermark_to_video(input_path, output_path, text, position, opacity, tiled, logo_path=None):
+def add_watermark_to_video(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None):
     try:
         clip = VideoFileClip(input_path)
 
         if logo_path:
             logo_clip = ImageClip(logo_path).resize(height=clip.h // 8)
             logo_clip = logo_clip.set_duration(clip.duration).set_opacity(opacity / 100)
-            pos = get_position(position, clip.w, clip.h, logo_clip.w, logo_clip.h)
+            pos = get_position(position, clip.w, clip.h, logo_clip.w, logo_clip.h, pos_x=pos_x, pos_y=pos_y)
             logo_clip = logo_clip.set_position(pos)
             final = CompositeVideoClip([clip, logo_clip])
         else:
@@ -315,7 +595,15 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
                     "右下": ("right", "bottom"),
                     "居中": ("center", "center"),
                 }
-                txt_clip = txt_clip.set_position(pos_map.get(position, ("right", "bottom")))
+                if pos_x is not None and pos_y is not None:
+                    txt_w = txt_clip.w or 0
+                    txt_h = txt_clip.h or 0
+                    txt_clip = txt_clip.set_position((
+                        max(0, int(clip.w * pos_x / 100) - txt_w // 2),
+                        max(0, int(clip.h * pos_y / 100) - txt_h // 2),
+                    ))
+                else:
+                    txt_clip = txt_clip.set_position(pos_map.get(position, ("right", "bottom")))
                 final = CompositeVideoClip([clip, txt_clip])
 
         # Fix #5: use cpu_count() for encoding threads
@@ -336,7 +624,11 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def get_position(pos_type, w, h, item_w, item_h):
+def get_position(pos_type, w, h, item_w, item_h, pos_x=None, pos_y=None):
+    if pos_x is not None and pos_y is not None:
+        x = int(w * pos_x / 100) - item_w // 2
+        y = int(h * pos_y / 100) - item_h // 2
+        return (max(0, min(w - item_w, x)), max(0, min(h - item_h, y)))
     m = 40
     if pos_type == "左上":
         return (m, m)

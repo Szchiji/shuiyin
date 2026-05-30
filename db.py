@@ -1,6 +1,7 @@
 """SQLite persistence layer for the watermark Telegram bot."""
 
 import os
+import secrets
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, timedelta
@@ -34,9 +35,18 @@ def init_db() -> None:
                 role          TEXT    NOT NULL DEFAULT 'regular',
                 member_until  TEXT,
                 daily_count   INTEGER NOT NULL DEFAULT 0,
-                last_reset    TEXT    NOT NULL DEFAULT ''
+                last_reset    TEXT    NOT NULL DEFAULT '',
+                web_token     TEXT
             )
         """)
+        # Migrate existing installations: add web_token column if missing.
+        # SQLite raises OperationalError with "duplicate column name" when the
+        # column already exists; re-raise for any other unexpected error.
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN web_token TEXT")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
         conn.execute("""
             CREATE TABLE IF NOT EXISTS watermark_settings (
                 user_id   INTEGER PRIMARY KEY,
@@ -48,6 +58,25 @@ def init_db() -> None:
                 tiled     INTEGER NOT NULL DEFAULT 0
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        # Insert defaults if table is empty
+        defaults = {
+            "default_text": "© Wei",
+            "default_position": "右下",
+            "default_opacity": "75",
+            "default_tiled": "0",
+            "daily_limit": str(DAILY_LIMIT),
+        }
+        for k, v in defaults.items():
+            conn.execute(
+                "INSERT OR IGNORE INTO system_settings (key, value) VALUES (?, ?)",
+                (k, v),
+            )
 
 
 # ── User helpers ──────────────────────────────────────────────────────────────
@@ -200,3 +229,65 @@ def get_stats() -> dict:
             (today,),
         ).fetchone()[0]
     return {"total": total, "members": members, "regulars": total - members, "active_today": active_today}
+
+
+# ── Web token ─────────────────────────────────────────────────────────────────
+
+def generate_web_token(user_id: int) -> str:
+    """Generate (or refresh) a random web-login token for *user_id*. Returns the token."""
+    token = secrets.token_urlsafe(24)
+    with _conn() as conn:
+        conn.execute("UPDATE users SET web_token=? WHERE user_id=?", (token, user_id))
+    return token
+
+
+def get_user_by_token(token: str) -> dict | None:
+    """Return the user row whose web_token matches, or None."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE web_token=?", (token,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+# ── User listing ──────────────────────────────────────────────────────────────
+
+def list_users(page: int = 1, limit: int = 20, search: str = "") -> tuple[list[dict], int]:
+    """Return (rows, total_count) for the given page."""
+    offset = (page - 1) * limit
+    with _conn() as conn:
+        if search:
+            pattern = f"%{search}%"
+            total = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE username LIKE ? OR first_name LIKE ? OR CAST(user_id AS TEXT) LIKE ?",
+                (pattern, pattern, pattern),
+            ).fetchone()[0]
+            rows = conn.execute(
+                "SELECT * FROM users WHERE username LIKE ? OR first_name LIKE ? OR CAST(user_id AS TEXT) LIKE ? "
+                "ORDER BY user_id LIMIT ? OFFSET ?",
+                (pattern, pattern, pattern, limit, offset),
+            ).fetchall()
+        else:
+            total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            rows = conn.execute(
+                "SELECT * FROM users ORDER BY user_id LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+    return [dict(r) for r in rows], total
+
+
+# ── System settings ───────────────────────────────────────────────────────────
+
+def get_system_settings() -> dict:
+    with _conn() as conn:
+        rows = conn.execute("SELECT key, value FROM system_settings").fetchall()
+    return {r["key"]: r["value"] for r in rows}
+
+
+def save_system_settings(**kwargs) -> None:
+    with _conn() as conn:
+        for k, v in kwargs.items():
+            conn.execute(
+                "INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)",
+                (k, str(v)),
+            )
