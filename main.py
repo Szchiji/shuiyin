@@ -194,7 +194,11 @@ async def telegram_webhook(token: str, request: Request):
     try:
         data = await request.json()
         update = Update.de_json(data, bot_application.bot)
-        await bot_application.process_update(update)
+        # Enqueue the update for the PTB background dispatcher rather than
+        # awaiting process_update() inline.  This returns 200 OK to Telegram
+        # immediately so it does not retry the update after its ~30 s timeout
+        # (which caused duplicate processing when video encoding took too long).
+        await bot_application.update_queue.put(update)
     except Exception as exc:
         logger.error("处理 Telegram webhook 更新时出错: %s", exc)
     return {"ok": True}
