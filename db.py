@@ -42,8 +42,9 @@ def init_db() -> None:
         # Migrate existing installations: add web_token column if missing
         try:
             conn.execute("ALTER TABLE users ADD COLUMN web_token TEXT")
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
         conn.execute("""
             CREATE TABLE IF NOT EXISTS watermark_settings (
                 user_id   INTEGER PRIMARY KEY,

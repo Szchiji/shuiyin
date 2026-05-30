@@ -508,9 +508,20 @@ function placeDragAt(pctX, pctY) {
   posReadout.textContent = `X ${Math.round(pctX)}%  Y ${Math.round(pctY)}%`;
 }
 
-function snapToPreset(name) { const c = SNAP[name] || SNAP['右下']; placeDragAt(c[0], c[1]); }
-function updateWmLabel() { wmDrag.textContent = (logoInput.files && logoInput.files[0]) ? '🖼 Logo' : (textInput.value.trim() || '水印'); }
-function updateTiledUI() { const on = tiledCheck.checked; wmDrag.classList.toggle('hidden', on); tiledOverlay.classList.toggle('active', on); }
+function snapToPreset(name) {
+  const c = SNAP[name] || SNAP['右下'];
+  placeDragAt(c[0], c[1]);
+}
+function updateWmLabel() {
+  wmDrag.textContent = (logoInput.files && logoInput.files[0])
+    ? '🖼 Logo'
+    : (textInput.value.trim() || '水印');
+}
+function updateTiledUI() {
+  const on = tiledCheck.checked;
+  wmDrag.classList.toggle('hidden', on);
+  tiledOverlay.classList.toggle('active', on);
+}
 
 fileInput.addEventListener('change', () => {
   const f = fileInput.files[0];

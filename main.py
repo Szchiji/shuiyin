@@ -30,7 +30,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "")
 if not SECRET_KEY:
     import secrets as _secrets
     SECRET_KEY = _secrets.token_hex(32)
-    logger.warning(
+    logger.error(
         "SECRET_KEY 环境变量未设置，已生成随机密钥——重启后所有 session 将失效。"
         "生产环境请设置固定的 SECRET_KEY。"
     )
@@ -93,7 +93,12 @@ _db.init_db()
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
 
-def _session_user(request: Request) -> dict | None:
+def _is_valid_telegram_id(value: str) -> bool:
+    """Return True if *value* is a valid Telegram user ID (positive or negative integer)."""
+    return value.strip().lstrip("-").isdigit()
+
+
+
     """Return the current session's user dict, or None if not logged in."""
     user_id = request.session.get("user_id")
     if not user_id:
@@ -150,7 +155,7 @@ async def login_post(
     user_id: str = Form(...),
     credential: str = Form(...),
 ):
-    if not user_id.strip().lstrip("-").isdigit():
+    if not _is_valid_telegram_id(user_id):
         return templates.TemplateResponse("login.html", {"request": request, "error": "Telegram ID 格式错误"})
 
     uid = int(user_id.strip())
@@ -231,10 +236,10 @@ async def save_settings(
         with open(logo_path, "wb") as f:
             shutil.copyfileobj(logo.file, f)
 
-    kwargs: dict = dict(wm_type=wm_type, text=text, position=position, opacity=opacity, tiled=int(tiled_bool))
+    watermark_settings: dict = dict(wm_type=wm_type, text=text, position=position, opacity=opacity, tiled=int(tiled_bool))
     if logo_path:
-        kwargs["logo_path"] = logo_path
-    _db.save_watermark_settings(uid, **kwargs)
+        watermark_settings["logo_path"] = logo_path
+    _db.save_watermark_settings(uid, **watermark_settings)
     return RedirectResponse("/dashboard?saved=1", status_code=302)
 
 

@@ -439,10 +439,9 @@ const logoInput        = document.getElementById('logo');
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 
-// Edge padding: keep watermark at least 2% from image boundary
+// Edge constraints: watermark position range from 2% to 98% of image dimensions
 const MIN_POS = 2, MAX_POS = 98;
-// Preset snap positions: center as % of image dimensions
-// (12% ≈ 88% correspond roughly to a 40 px margin on a 320 px dimension)
+// Preset snap positions as % of image dimensions (12% and 88% provide edge margins, 50% for center)
 const SNAP = {
   '右下': [88, 88], '左上': [12, 12],
   '右上': [88, 12], '左下': [12, 88], '居中': [50, 50],
