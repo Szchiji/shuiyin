@@ -342,7 +342,7 @@
         <div class="field" id="logo-scale-field" style="display:none;">
           <label>图片水印大小</label>
           <div class="opacity-row">
-            <input type="range" id="logo_scale" name="logo_scale" min="5" max="50" value="{{ settings.logo_scale or 20 }}"
+            <input type="range" id="logo_scale" name="logo_scale" min="5" max="100" value="{{ settings.logo_scale or 20 }}"
                    oninput="document.getElementById('logo-scale-val').textContent=this.value+'%'" />
             <span class="opacity-val" id="logo-scale-val">{{ settings.logo_scale or 20 }}%</span>
           </div>
@@ -395,7 +395,7 @@
         <div class="field" id="tmpl-logo-scale-field" style="display:none;">
           <label>默认图片水印大小</label>
           <div class="opacity-row">
-            <input type="range" name="logo_scale" min="5" max="50" value="{{ settings.logo_scale or 20 }}"
+            <input type="range" name="logo_scale" min="5" max="100" value="{{ settings.logo_scale or 20 }}"
                    oninput="this.nextElementSibling.textContent=this.value+'%'" />
             <span class="opacity-val">{{ settings.logo_scale or 20 }}%</span>
           </div>
