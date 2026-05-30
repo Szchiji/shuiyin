@@ -4,3 +4,5 @@ pillow
 moviepy
 python-multipart
 aiofiles
+jinja2
+python-telegram-bot
