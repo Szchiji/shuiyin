@@ -126,7 +126,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get("awaiting_text"):
         s = get_settings(context)
-        s["text"] = update.message.text.strip() or s["text"]
+        new_text = update.message.text.strip()
+        if not new_text:
+            await update.message.reply_text("❌ 水印文字不能为空，请重新输入：")
+            return
+        s["text"] = new_text
         context.user_data["awaiting_text"] = False
         await update.message.reply_text(
             f"✅ 水印文字已设为：{s['text']}\n\n" + settings_summary(s),
@@ -189,14 +193,14 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     None,
                     add_watermark_to_video,
                     input_path, output_path, text,
-                    s["position"], s["opacity"], s["tiled"], None,
+                    s["position"], s["opacity"], s["tiled"], None,  # None = no logo
                 )
             else:
                 success = await loop.run_in_executor(
                     None,
                     add_watermark_to_image,
                     input_path, output_path, text,
-                    s["position"], s["opacity"], s["tiled"], None,
+                    s["position"], s["opacity"], s["tiled"], None,  # None = no logo
                 )
 
             if not success:
