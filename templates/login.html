@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 — 水印小程序</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f0f2f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.08);
+      padding: 40px 44px;
+      width: 100%;
+      max-width: 420px;
+    }
+    h1 { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; margin-bottom: 6px; }
+    .subtitle { font-size: .88rem; color: #888; margin-bottom: 28px; }
+    .field { margin-bottom: 18px; }
+    label { display: block; font-size: .84rem; font-weight: 600; color: #555; margin-bottom: 6px; }
+    input[type="text"],
+    input[type="password"],
+    input[type="number"] {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: .95rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus { border-color: #4f8ef7; }
+    .hint { font-size: .78rem; color: #aaa; margin-top: 5px; }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: #4f8ef7;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 6px;
+      transition: background .2s;
+    }
+    .btn:hover { background: #3a7de0; }
+    .error {
+      background: #fdecea;
+      border: 1px solid #f5b7b1;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: .88rem;
+      color: #c0392b;
+      margin-bottom: 18px;
+    }
+    .info-box {
+      background: #eaf2ff;
+      border: 1px solid #b3d0ff;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: .82rem;
+      color: #2c5f9e;
+      margin-top: 20px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>🖼️ 水印小程序</h1>
+  <p class="subtitle">请登录以使用水印功能</p>
+
+  {% if error %}
+  <div class="error">❌ {{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/login">
+    <div class="field">
+      <label for="user_id">Telegram 用户 ID</label>
+      <input type="number" id="user_id" name="user_id" placeholder="如：123456789" required />
+      <p class="hint">在 Telegram 发送 <b>/start</b> 给 @userinfobot 可查询你的 ID</p>
+    </div>
+    <div class="field">
+      <label for="credential">登录凭证</label>
+      <input type="password" id="credential" name="credential" placeholder="令牌 或 管理员密码" required />
+      <p class="hint">普通/会员用户：在 Telegram 机器人发送 <b>/webtoken</b> 获取令牌<br>管理员：输入 WEB_ADMIN_PASSWORD</p>
+    </div>
+    <button type="submit" class="btn">登录</button>
+  </form>
+
+  <div class="info-box">
+    💡 <b>如何获取令牌？</b><br>
+    在 Telegram 中找到本机器人，发送命令 <code>/webtoken</code>，机器人会私信回复你的专属登录令牌。
+  </div>
+</div>
+</body>
+</html>

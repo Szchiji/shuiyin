@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>管理后台 — 水印小程序</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; background: #f0f2f5; color: #333; min-height: 100vh; }
+
+    /* ── Nav ── */
+    .nav {
+      background: #1a1a2e;
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav-brand { font-size: 1.05rem; font-weight: 700; color: #fff; }
+    .nav-right { display: flex; align-items: center; gap: 16px; font-size: .88rem; }
+    .nav-link { color: #aac4ff; text-decoration: none; }
+    .nav-link:hover { color: #fff; }
+    .badge-admin { background: #ffc107; color: #1a1a2e; padding: 2px 10px; border-radius: 20px; font-size: .78rem; font-weight: 700; }
+
+    /* ── Layout ── */
+    .layout { display: flex; min-height: calc(100vh - 56px); }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 200px;
+      background: #fff;
+      box-shadow: 1px 0 8px rgba(0,0,0,.06);
+      padding: 20px 0;
+      flex-shrink: 0;
+    }
+    .sidebar-item {
+      display: block;
+      padding: 12px 20px;
+      color: #555;
+      text-decoration: none;
+      font-size: .9rem;
+      font-weight: 500;
+      border-left: 3px solid transparent;
+      transition: all .15s;
+    }
+    .sidebar-item:hover { background: #f5f6fa; color: #1a1a2e; }
+    .sidebar-item.active { border-left-color: #4f8ef7; background: #eaf2ff; color: #1a1a2e; font-weight: 700; }
+
+    /* ── Main ── */
+    .main { flex: 1; padding: 28px 28px 48px; min-width: 0; }
+    .page-title { font-size: 1.3rem; font-weight: 700; color: #1a1a2e; margin-bottom: 24px; }
+
+    /* ── Cards ── */
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.06);
+      padding: 24px 28px;
+      margin-bottom: 24px;
+    }
+    .card-title { font-size: .95rem; font-weight: 700; color: #1a1a2e; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid #f0f0f0; }
+
+    /* ── Stats grid ── */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.06); padding: 20px 20px 16px; text-align: center; }
+    .stat-num { font-size: 2rem; font-weight: 700; color: #4f8ef7; }
+    .stat-label { font-size: .82rem; color: #888; margin-top: 4px; }
+
+    /* ── Table ── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th { background: #f5f6fa; color: #555; font-weight: 600; padding: 10px 14px; text-align: left; white-space: nowrap; }
+    td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fafafa; }
+
+    /* ── Role badges ── */
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: .78rem; font-weight: 600; }
+    .badge-admin-t { background: #fff3cd; color: #856404; }
+    .badge-member-t { background: #d1ecf1; color: #0c5460; }
+    .badge-regular-t { background: #e2e3e5; color: #383d41; }
+    .badge-expired { background: #fdecea; color: #c0392b; }
+
+    /* ── Forms ── */
+    .field { margin-bottom: 16px; }
+    label { display: block; font-size: .84rem; font-weight: 600; color: #555; margin-bottom: 5px; }
+    input[type="text"], input[type="number"], input[type="password"], select {
+      width: 100%;
+      padding: 9px 13px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: .92rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus, select:focus { border-color: #4f8ef7; }
+    input[type="range"] { width: 100%; accent-color: #4f8ef7; }
+    .opacity-row { display: flex; align-items: center; gap: 10px; }
+    .opacity-row input[type="range"] { flex: 1; }
+    .opacity-val { min-width: 36px; text-align: right; font-weight: 600; color: #4f8ef7; }
+    .checkbox-row { display: flex; align-items: center; gap: 8px; }
+    .checkbox-row input { width: 17px; height: 17px; accent-color: #4f8ef7; }
+    .hint { font-size: .78rem; color: #aaa; margin-top: 4px; }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 8px 18px;
+      border: none;
+      border-radius: 7px;
+      font-size: .88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s, opacity .2s;
+    }
+    .btn-primary { background: #4f8ef7; color: #fff; }
+    .btn-primary:hover { background: #3a7de0; }
+    .btn-danger { background: #e74c3c; color: #fff; }
+    .btn-danger:hover { background: #c0392b; }
+    .btn-success { background: #27ae60; color: #fff; }
+    .btn-success:hover { background: #1e8449; }
+    .btn-sm { padding: 5px 12px; font-size: .82rem; }
+    .btn-full { width: 100%; padding: 11px; font-size: .95rem; }
+
+    /* ── Search bar ── */
+    .search-row { display: flex; gap: 8px; margin-bottom: 16px; }
+    .search-row input { flex: 1; }
+
+    /* ── Inline form (in table) ── */
+    .inline-form { display: flex; gap: 6px; align-items: center; }
+    .inline-form input[type="number"] { width: 70px; padding: 5px 8px; font-size: .82rem; }
+
+    /* ── Pagination ── */
+    .pagination { display: flex; gap: 6px; margin-top: 16px; align-items: center; justify-content: center; }
+    .page-btn { padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; font-size: .85rem; }
+    .page-btn.active { background: #4f8ef7; color: #fff; border-color: #4f8ef7; }
+    .page-btn:hover:not(.active) { background: #f0f2f5; }
+
+    /* ── Alert ── */
+    .alert { padding: 11px 16px; border-radius: 8px; font-size: .88rem; margin-bottom: 16px; }
+    .alert-success { background: #eaf4ea; border: 1px solid #b2dfb2; color: #3a7d3a; }
+    .alert-info { background: #eaf2ff; border: 1px solid #b3d0ff; color: #2c5f9e; }
+  </style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="nav-brand">🖼️ 水印小程序 — 管理后台</span>
+  <div class="nav-right">
+    <span style="color:#fff;">{{ user.first_name or user.username or ('管理员 ' ~ user.user_id) }}</span>
+    <span class="badge-admin">👑 管理员</span>
+    <a href="/dashboard" class="nav-link">水印工具</a>
+    <a href="/logout" class="nav-link">退出</a>
+  </div>
+</nav>
+
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <a href="/admin" class="sidebar-item {% if tab == 'overview' %}active{% endif %}">📊 概览</a>
+    <a href="/admin/users" class="sidebar-item {% if tab == 'users' %}active{% endif %}">👥 用户管理</a>
+    <a href="/admin/settings" class="sidebar-item {% if tab == 'settings' %}active{% endif %}">⚙️ 系统设置</a>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main">
+
+    <!-- ═══ OVERVIEW ════════════════════════════════════════════════════════ -->
+    {% if tab == 'overview' %}
+    <h1 class="page-title">📊 概览</h1>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-num">{{ stats.total }}</div>
+        <div class="stat-label">总用户数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" style="color:#0c5460;">{{ stats.members }}</div>
+        <div class="stat-label">当前会员数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" style="color:#383d41;">{{ stats.regulars }}</div>
+        <div class="stat-label">普通用户数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" style="color:#27ae60;">{{ stats.active_today }}</div>
+        <div class="stat-label">今日活跃</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">快捷操作</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <a href="/admin/users" style="text-decoration:none;"><button class="btn btn-primary">👥 管理用户</button></a>
+        <a href="/admin/settings" style="text-decoration:none;"><button class="btn btn-primary">⚙️ 系统设置</button></a>
+        <a href="/dashboard" style="text-decoration:none;"><button class="btn btn-success">🎨 水印工具</button></a>
+      </div>
+    </div>
+
+    <!-- ═══ USERS ════════════════════════════════════════════════════════════ -->
+    {% elif tab == 'users' %}
+    <h1 class="page-title">👥 用户管理</h1>
+
+    {% if request.query_params.get('msg') %}
+    <div class="alert alert-success">✅ {{ request.query_params.get('msg') }}</div>
+    {% endif %}
+
+    <!-- Search -->
+    <form method="get" action="/admin/users">
+      <div class="search-row">
+        <input type="text" name="search" placeholder="搜索 ID / 用户名 / 姓名…" value="{{ search }}" />
+        <button type="submit" class="btn btn-primary">搜索</button>
+        {% if search %}<a href="/admin/users" style="text-decoration:none;"><button type="button" class="btn btn-primary" style="background:#888;">清空</button></a>{% endif %}
+      </div>
+    </form>
+
+    <!-- Quick add member -->
+    <div class="card">
+      <div class="card-title">➕ 快速授权会员</div>
+      <form method="post" action="/admin/members/add">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+          <div class="field" style="flex:1;min-width:160px;margin-bottom:0;">
+            <label>用户 ID</label>
+            <input type="number" name="target_id" placeholder="Telegram 用户 ID" required />
+          </div>
+          <div class="field" style="width:100px;margin-bottom:0;">
+            <label>天数</label>
+            <input type="number" name="days" value="30" min="1" required />
+          </div>
+          <button type="submit" class="btn btn-success">授权会员</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- User table -->
+    <div class="card">
+      <div class="card-title">用户列表（共 {{ total }} 人）</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>姓名 / 用户名</th>
+              <th>角色</th>
+              <th>会员到期</th>
+              <th>今日使用</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in users %}
+            <tr>
+              <td><code>{{ u.user_id }}</code></td>
+              <td>
+                {{ u.first_name or '—' }}
+                {% if u.username %}<span style="color:#888;font-size:.82rem;">@{{ u.username }}</span>{% endif %}
+              </td>
+              <td>
+                {% if u.effective_role == 'admin' %}
+                  <span class="badge badge-admin-t">👑 管理员</span>
+                {% elif u.effective_role == 'member' %}
+                  <span class="badge badge-member-t">⭐ 会员</span>
+                {% elif u.member_expired %}
+                  <span class="badge badge-expired">过期会员</span>
+                {% else %}
+                  <span class="badge badge-regular-t">普通用户</span>
+                {% endif %}
+              </td>
+              <td>{{ u.member_until or '—' }}</td>
+              <td>{{ u.daily_count }}</td>
+              <td>
+                {% if u.effective_role != 'admin' %}
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                  {% if u.effective_role != 'member' %}
+                  <form method="post" action="/admin/members/add" style="display:inline;">
+                    <input type="hidden" name="target_id" value="{{ u.user_id }}" />
+                    <div class="inline-form">
+                      <input type="number" name="days" value="30" min="1" title="授权天数" />
+                      <button type="submit" class="btn btn-success btn-sm">授权会员</button>
+                    </div>
+                  </form>
+                  {% else %}
+                  <form method="post" action="/admin/members/revoke" style="display:inline;" onsubmit="return confirm('确认撤销 {{ u.user_id }} 的会员资格？')">
+                    <input type="hidden" name="target_id" value="{{ u.user_id }}" />
+                    <button type="submit" class="btn btn-danger btn-sm">撤销会员</button>
+                  </form>
+                  {% endif %}
+                </div>
+                {% else %}
+                <span style="color:#aaa;font-size:.82rem;">—</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" style="text-align:center;color:#aaa;padding:24px;">暂无用户</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      {% if pages > 1 %}
+      <div class="pagination">
+        {% for p in range(1, pages + 1) %}
+        <a href="/admin/users?page={{ p }}&search={{ search }}">
+          <button class="page-btn {% if p == page %}active{% endif %}">{{ p }}</button>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- ═══ SETTINGS ══════════════════════════════════════════════════════════ -->
+    {% elif tab == 'settings' %}
+    <h1 class="page-title">⚙️ 系统设置</h1>
+
+    {% if request.query_params.get('saved') %}
+    <div class="alert alert-success">✅ 设置已保存！</div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card-title">默认水印参数（新用户首次使用的默认值）</div>
+      <form method="post" action="/admin/settings">
+        <div class="field">
+          <label>默认水印文字</label>
+          <input type="text" name="default_text" value="{{ sys_settings.default_text or '© Wei' }}" />
+        </div>
+        <div class="field">
+          <label>默认水印位置</label>
+          <select name="default_position">
+            {% for p, l in [('右下','右下角'),('左上','左上角'),('右上','右上角'),('左下','左下角'),('居中','居中')] %}
+            <option value="{{ p }}" {% if sys_settings.default_position == p %}selected{% endif %}>{{ l }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>默认透明度</label>
+          <div class="opacity-row">
+            <input type="range" name="default_opacity" min="0" max="100"
+                   value="{{ sys_settings.default_opacity or '75' }}"
+                   oninput="this.nextElementSibling.textContent=this.value+'%'" />
+            <span class="opacity-val">{{ sys_settings.default_opacity or '75' }}%</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>默认平铺</label>
+          <label class="checkbox-row">
+            <input type="checkbox" name="default_tiled" value="1"
+                   {% if sys_settings.default_tiled == '1' %}checked{% endif %} />
+            <span>默认开启全图平铺</span>
+          </label>
+        </div>
+        <hr style="border:none;border-top:1px solid #f0f0f0;margin:20px 0;" />
+        <div class="field">
+          <label>普通用户每日限额（次）</label>
+          <input type="number" name="daily_limit" min="1" max="100"
+                 value="{{ sys_settings.daily_limit or '3' }}" style="width:120px;" />
+          <p class="hint">修改后对当日已重置的用户立即生效，次日对所有普通用户生效</p>
+        </div>
+        <button type="submit" class="btn btn-success btn-full">💾 保存设置</button>
+      </form>
+    </div>
+
+    {% endif %}
+
+  </main>
+</div>
+</body>
+</html>
