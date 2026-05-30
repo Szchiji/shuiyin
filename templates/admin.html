@@ -440,7 +440,7 @@ function confirmRevoke(form) {
   }
 
   function getXY(posType, tw, th) {
-    const m = Math.round(H * 0.045);   // ~40px on a 900px image
+    const m = Math.round(H * 0.045);   // ~12px margin at canvas height of 270px
     if (posType === '左上') return [m, m];
     if (posType === '右上') return [W - tw - m, m];
     if (posType === '左下') return [m, H - th - m];
@@ -464,7 +464,7 @@ function confirmRevoke(form) {
     const alpha   = opEl    ? parseInt(opEl.value) / 100 : 0.75;
     const tiled   = tiledEl ? tiledEl.checked : false;
 
-    const px = Math.max(12, Math.round(H * 0.065));   // ~5 % of image height
+    const px = Math.max(12, Math.round(H * 0.05));   // 5% of image height
     ctx.font = `bold ${px}px "PingFang SC","Microsoft YaHei",sans-serif`;
     ctx.textBaseline = 'top';
     ctx.globalAlpha = alpha;
