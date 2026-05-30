@@ -63,6 +63,7 @@ python main.py
 | `WEB_ADMIN_PASSWORD` | ✅ | 管理员登录网页后台的密码 |
 | `ADMIN_USERNAME` | 可选 | 显示给普通用户的管理员联系方式（不含 @），如 `myname` |
 | `WEB_URL` | 可选 | 网站公开 URL，用于 `/webtoken` 回复中的链接，如 `https://your-domain.com` |
+| `WEBHOOK_URL` | 可选 | 机器人 Webhook 公开 HTTPS URL，如 `https://your-domain.com`。设置后机器人改用 webhook 模式接收消息，避免多实例部署时的轮询冲突；不设置则使用 polling（仅适合本地开发） |
 
 设置 `BOT_TOKEN` 后，机器人将在 Web 服务启动时自动一起启动。
 

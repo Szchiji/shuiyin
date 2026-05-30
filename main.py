@@ -35,10 +35,17 @@ if not SECRET_KEY:
         "生产环境请设置固定的 SECRET_KEY。"
     )
 WEB_ADMIN_PASSWORD = os.getenv("WEB_ADMIN_PASSWORD", "")
+# Public HTTPS URL of this service, e.g. https://your-app.railway.app
+# When set, the bot uses webhook mode instead of polling (avoids Conflict errors
+# caused by multiple instances running simultaneously during rolling deploys).
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").rstrip("/")
 
 ADMIN_IDS: set[int] = {
     int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()
 }
+
+# Global reference to the running bot Application (set in lifespan)
+_bot_app = None
 
 # ── Upload size limit middleware (200 MB) ────────────────────────────────────
 MAX_UPLOAD_SIZE = 200 * 1024 * 1024  # 200 MB
@@ -56,24 +63,44 @@ class LimitUploadSizeMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    bot_app = None
+    global _bot_app
     if os.getenv("BOT_TOKEN"):
         try:
             from bot import build_application  # noqa: PLC0415
             bot_app = build_application()
             await bot_app.initialize()
             await bot_app.start()
-            await bot_app.updater.start_polling()
-            logger.info("Telegram 机器人已启动")
+            if WEBHOOK_URL:
+                # Webhook mode: Telegram POSTs updates to our endpoint.
+                # This avoids the "Conflict: terminated by other getUpdates
+                # request" error that occurs when multiple instances (e.g.
+                # during a rolling deploy) each try to poll simultaneously.
+                token = os.getenv("BOT_TOKEN")
+                await bot_app.bot.set_webhook(
+                    url=f"{WEBHOOK_URL}/telegram-webhook/{token}"
+                )
+                logger.info("Telegram 机器人已启动（webhook 模式）")
+            else:
+                # Polling mode: suitable for local development only.
+                await bot_app.updater.start_polling()
+                logger.info("Telegram 机器人已启动（polling 模式）")
+            _bot_app = bot_app
         except Exception as e:
             logger.error("Telegram 机器人启动失败: %s", e)
-            bot_app = None
     yield
-    if bot_app is not None:
-        await bot_app.updater.stop()
-        await bot_app.stop()
-        await bot_app.shutdown()
-        logger.info("Telegram 机器人已停止")
+    if _bot_app is not None:
+        try:
+            if WEBHOOK_URL:
+                await _bot_app.bot.delete_webhook()
+            else:
+                await _bot_app.updater.stop()
+            await _bot_app.stop()
+            await _bot_app.shutdown()
+            logger.info("Telegram 机器人已停止")
+        except Exception as e:
+            logger.error("Telegram 机器人停止失败: %s", e)
+        finally:
+            _bot_app = None
 
 
 app = FastAPI(title="水印小程序", lifespan=lifespan)
@@ -142,6 +169,24 @@ def cleanup_file(path: str, delay: int = 300):
     time.sleep(delay)
     if os.path.exists(path):
         os.remove(path)
+
+
+# ── Telegram webhook endpoint ─────────────────────────────────────────────────
+
+@app.post("/telegram-webhook/{token}")
+async def telegram_webhook(token: str, request: Request):
+    """Receive updates from Telegram in webhook mode.
+
+    The bot token in the path acts as a shared secret so that only Telegram
+    (which knows the token) can post updates here.
+    """
+    if token != os.getenv("BOT_TOKEN") or _bot_app is None:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    from telegram import Update  # noqa: PLC0415
+    data = await request.json()
+    update = Update.de_json(data, _bot_app.bot)
+    await _bot_app.process_update(update)
+    return {"ok": True}
 
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
