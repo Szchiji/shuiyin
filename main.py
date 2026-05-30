@@ -62,7 +62,7 @@ app.add_middleware(LimitUploadSizeMiddleware)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-for d in ["uploads", "outputs", "fonts", "logos"]:
+for d in ["uploads", "outputs", "fonts", "logos", "user_logos"]:
     os.makedirs(d, exist_ok=True)
 
 FONT_PATH = "fonts/simhei.ttf"
