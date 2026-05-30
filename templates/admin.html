@@ -20,7 +20,14 @@
       top: 0;
       z-index: 100;
     }
-    .nav-brand { font-size: 1.05rem; font-weight: 700; color: #fff; }
+    .nav-brand {
+      font-size: 1.05rem; font-weight: 700; color: #fff;
+      cursor: pointer; user-select: none;
+      display: flex; align-items: center; gap: 8px;
+      background: none; border: none; padding: 0;
+    }
+    .nav-brand:hover { opacity: .85; }
+    .nav-brand-icon { font-size: 1rem; transition: transform .25s; }
     .nav-right { display: flex; align-items: center; gap: 16px; font-size: .88rem; }
     .nav-link { color: #aac4ff; text-decoration: none; }
     .nav-link:hover { color: #fff; }
@@ -31,27 +38,65 @@
 
     /* ── Sidebar ── */
     .sidebar {
-      width: 200px;
+      width: 160px;
       background: #fff;
       box-shadow: 1px 0 8px rgba(0,0,0,.06);
-      padding: 20px 0;
+      padding: 16px 0;
       flex-shrink: 0;
+      overflow: hidden;
+      transition: width .25s ease, padding .25s ease;
     }
+    .sidebar.collapsed { width: 0; padding: 0; }
     .sidebar-item {
       display: block;
-      padding: 12px 20px;
+      padding: 11px 16px;
       color: #555;
       text-decoration: none;
-      font-size: .9rem;
+      font-size: .88rem;
       font-weight: 500;
       border-left: 3px solid transparent;
+      white-space: nowrap;
       transition: all .15s;
     }
     .sidebar-item:hover { background: #f5f6fa; color: #1a1a2e; }
     .sidebar-item.active { border-left-color: #4f8ef7; background: #eaf2ff; color: #1a1a2e; font-weight: 700; }
 
+    /* ── Sidebar overlay (mobile) ── */
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.35);
+      z-index: 90;
+    }
+    .sidebar-overlay.active { display: block; }
+
     /* ── Main ── */
     .main { flex: 1; padding: 28px 28px 48px; min-width: 0; }
+
+    /* ── Mobile ── */
+    @media (max-width: 640px) {
+      .nav { padding: 0 14px; }
+      .sidebar {
+        position: fixed;
+        top: 56px;
+        left: 0;
+        height: calc(100vh - 56px);
+        z-index: 95;
+        width: 200px;
+        transition: transform .25s ease;
+        transform: translateX(0);
+        padding: 16px 0;
+      }
+      .sidebar.collapsed {
+        transform: translateX(-100%);
+        width: 200px;
+        padding: 16px 0;
+      }
+      .main { padding: 18px 14px 48px; }
+      .card { padding: 18px 16px; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
     .page-title { font-size: 1.3rem; font-weight: 700; color: #1a1a2e; margin-bottom: 24px; }
 
     /* ── Cards ── */
@@ -151,7 +196,10 @@
 <body>
 
 <nav class="nav">
-  <span class="nav-brand">🖼️ 水印小程序 — 管理后台</span>
+  <button class="nav-brand" id="sidebar-toggle" onclick="toggleSidebar()" aria-label="切换侧边栏">
+    <span class="nav-brand-icon" id="sidebar-icon">☰</span>
+    <span>水印小程序 — 管理后台</span>
+  </button>
   <div class="nav-right">
     <span style="color:#fff;">{{ user.first_name or user.username or ('管理员 ' ~ user.user_id) }}</span>
     <span class="badge-admin">👑 管理员</span>
@@ -160,13 +208,14 @@
   </div>
 </nav>
 
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 <div class="layout">
 
   <!-- Sidebar -->
-  <aside class="sidebar">
-    <a href="/admin" class="sidebar-item {% if tab == 'overview' %}active{% endif %}">📊 概览</a>
-    <a href="/admin/users" class="sidebar-item {% if tab == 'users' %}active{% endif %}">👥 用户管理</a>
-    <a href="/admin/settings" class="sidebar-item {% if tab == 'settings' %}active{% endif %}">⚙️ 系统设置</a>
+  <aside class="sidebar" id="sidebar">
+    <a href="/admin" class="sidebar-item {% if tab == 'overview' %}active{% endif %}" onclick="closeSidebarMobile()">📊 概览</a>
+    <a href="/admin/users" class="sidebar-item {% if tab == 'users' %}active{% endif %}" onclick="closeSidebarMobile()">👥 用户管理</a>
+    <a href="/admin/settings" class="sidebar-item {% if tab == 'settings' %}active{% endif %}" onclick="closeSidebarMobile()">⚙️ 系统设置</a>
   </aside>
 
   <!-- Main content -->
@@ -382,6 +431,57 @@ function confirmRevoke(form) {
   const tid = form.querySelector('input[name="target_id"]').value;
   return confirm('确认撤销用户 ' + tid + ' 的会员资格？');
 }
+
+// ── Sidebar toggle ─────────────────────────────────────────────────────────
+const sidebar = document.getElementById('sidebar');
+const overlay = document.getElementById('sidebar-overlay');
+const icon    = document.getElementById('sidebar-icon');
+const isMobile = () => window.innerWidth <= 640;
+
+function toggleSidebar() {
+  if (isMobile()) {
+    const open = !sidebar.classList.contains('collapsed');
+    open ? closeSidebar() : openSidebar();
+  } else {
+    sidebar.classList.toggle('collapsed');
+    icon.textContent = sidebar.classList.contains('collapsed') ? '☰' : '✕';
+  }
+}
+function openSidebar() {
+  sidebar.classList.remove('collapsed');
+  overlay.classList.add('active');
+  icon.textContent = '✕';
+}
+function closeSidebar() {
+  sidebar.classList.add('collapsed');
+  overlay.classList.remove('active');
+  icon.textContent = '☰';
+}
+function closeSidebarMobile() {
+  if (isMobile()) closeSidebar();
+}
+
+// On desktop restore state from localStorage; on mobile default closed
+(function () {
+  if (isMobile()) {
+    closeSidebar();
+  } else {
+    const saved = localStorage.getItem('admin-sidebar');
+    if (saved === 'collapsed') {
+      sidebar.classList.add('collapsed');
+      icon.textContent = '☰';
+    } else {
+      icon.textContent = '✕';
+    }
+  }
+})();
+
+// Persist desktop state
+sidebar.addEventListener('transitionend', () => {
+  if (!isMobile()) {
+    localStorage.setItem('admin-sidebar', sidebar.classList.contains('collapsed') ? 'collapsed' : 'open');
+  }
+});
 
 // ── Admin settings real-time watermark preview ─────────────────────────────
 (function () {
