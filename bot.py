@@ -285,6 +285,22 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(text)
 
 
+# ── /webtoken ─────────────────────────────────────────────────────────────────
+
+async def cmd_webtoken(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    db.ensure_user(user.id, user.username or "", user.first_name or "")
+    token = db.generate_web_token(user.id)
+    web_url = os.getenv("WEB_URL", "http://localhost:8000")
+    await update.message.reply_text(
+        f"🔑 你的网页登录令牌：\n\n<code>{token}</code>\n\n"
+        f"在网页登录页输入你的 Telegram ID <code>{user.id}</code> 和上方令牌即可登录。\n"
+        f"🌐 网址：{web_url}/login\n\n"
+        "⚠️ 令牌仅供本人使用，请勿分享给他人。每次发送此命令会刷新令牌。",
+        parse_mode="HTML",
+    )
+
+
 # ── Callback handler ──────────────────────────────────────────────────────────
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -567,6 +583,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("revokemember", cmd_revokemember))
     app.add_handler(CommandHandler("userinfo", cmd_userinfo))
     app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("webtoken", cmd_webtoken))
 
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
