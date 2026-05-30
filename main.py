@@ -562,6 +562,8 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
             logo = Image.open(logo_path).convert("RGBA")
             logo_size = int(min(w, h) * max(5, min(50, logo_scale)) / 100)
             lw, lh = logo.size
+            if lw <= 0 or lh <= 0:
+                lw, lh = max(1, lw), max(1, lh)
             if lw >= lh:
                 new_w = logo_size
                 new_h = max(1, int(lh * logo_size / lw))
