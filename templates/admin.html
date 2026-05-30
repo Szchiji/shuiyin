@@ -143,6 +143,9 @@
     .alert { padding: 11px 16px; border-radius: 8px; font-size: .88rem; margin-bottom: 16px; }
     .alert-success { background: #eaf4ea; border: 1px solid #b2dfb2; color: #3a7d3a; }
     .alert-info { background: #eaf2ff; border: 1px solid #b3d0ff; color: #2c5f9e; }
+
+    /* ── Admin real-time preview ── */
+    #admin-preview-canvas { width: 100%; border-radius: 8px; display: block; background: #1a1a2e; }
   </style>
 </head>
 <body>
@@ -354,6 +357,11 @@
             <span>默认开启全图平铺</span>
           </label>
         </div>
+        <div class="field">
+          <label>🎨 水印效果预览（实时）</label>
+          <canvas id="admin-preview-canvas" width="480" height="270"></canvas>
+          <p class="hint">模拟效果仅供参考，实际效果以处理后的图片为准</p>
+        </div>
         <hr style="border:none;border-top:1px solid #f0f0f0;margin:20px 0;" />
         <div class="field">
           <label>普通用户每日限额（次）</label>
@@ -374,6 +382,130 @@ function confirmRevoke(form) {
   const tid = form.querySelector('input[name="target_id"]').value;
   return confirm('确认撤销用户 ' + tid + ' 的会员资格？');
 }
+
+// ── Admin settings real-time watermark preview ─────────────────────────────
+(function () {
+  const canvas = document.getElementById('admin-preview-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  function drawBg() {
+    // Sky gradient
+    const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
+    sky.addColorStop(0, '#3a7bd5');
+    sky.addColorStop(1, '#87ceeb');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H * 0.55);
+
+    // Ground gradient
+    const gnd = ctx.createLinearGradient(0, H * 0.55, 0, H);
+    gnd.addColorStop(0, '#5a8a3c');
+    gnd.addColorStop(1, '#2d5a1b');
+    ctx.fillStyle = gnd;
+    ctx.fillRect(0, H * 0.55, W, H * 0.45);
+
+    // Sun
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,220,80,0.55)';
+    ctx.beginPath();
+    ctx.arc(W * 0.72, H * 0.22, H * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Mountains
+    ctx.fillStyle = '#3a6020';
+    ctx.beginPath();
+    ctx.moveTo(0, H * 0.72);
+    ctx.lineTo(W * 0.12, H * 0.45);
+    ctx.lineTo(W * 0.32, H * 0.62);
+    ctx.lineTo(W * 0.48, H * 0.38);
+    ctx.lineTo(W * 0.65, H * 0.58);
+    ctx.lineTo(W * 0.82, H * 0.42);
+    ctx.lineTo(W, H * 0.52);
+    ctx.lineTo(W, H);
+    ctx.lineTo(0, H);
+    ctx.closePath();
+    ctx.fill();
+
+    // Watermark label
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.font = `bold ${Math.round(H * 0.09)}px "PingFang SC","Microsoft YaHei",sans-serif`;
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('示例图片', W / 2, H * 0.22);
+    ctx.restore();
+  }
+
+  function getXY(posType, tw, th) {
+    const m = Math.round(H * 0.045);   // ~40px on a 900px image
+    if (posType === '左上') return [m, m];
+    if (posType === '右上') return [W - tw - m, m];
+    if (posType === '左下') return [m, H - th - m];
+    if (posType === '中上') return [(W - tw) / 2, m];
+    if (posType === '中下') return [(W - tw) / 2, H - th - m];
+    if (posType === '居中') return [(W - tw) / 2, (H - th) / 2];
+    return [W - tw - m, H - th - m];   // 右下 default
+  }
+
+  function drawPreview() {
+    ctx.clearRect(0, 0, W, H);
+    drawBg();
+
+    const textEl   = document.querySelector('[name="default_text"]');
+    const posEl    = document.querySelector('[name="default_position"]');
+    const opEl     = document.querySelector('[name="default_opacity"]');
+    const tiledEl  = document.querySelector('[name="default_tiled"]');
+
+    const text    = textEl  ? (textEl.value.trim() || '水印') : '水印';
+    const pos     = posEl   ? posEl.value  : '右下';
+    const alpha   = opEl    ? parseInt(opEl.value) / 100 : 0.75;
+    const tiled   = tiledEl ? tiledEl.checked : false;
+
+    const px = Math.max(12, Math.round(H * 0.065));   // ~5 % of image height
+    ctx.font = `bold ${px}px "PingFang SC","Microsoft YaHei",sans-serif`;
+    ctx.textBaseline = 'top';
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = 'rgba(0,0,0,0.9)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+
+    if (tiled) {
+      const tw = ctx.measureText(text).width;
+      const th = px * 1.2;
+      const sx = tw * 1.8, sy = th * 2.0;
+      for (let x = -tw; x < W + tw; x += sx) {
+        for (let y = -th; y < H + th; y += sy) {
+          ctx.fillText(text, x, y);
+        }
+      }
+    } else {
+      const tw = ctx.measureText(text).width;
+      const [x, y] = getXY(pos, tw, px);
+      ctx.fillText(text, x, y);
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+  }
+
+  // Listen to every settings control
+  document.querySelectorAll(
+    '[name="default_text"],[name="default_position"],[name="default_opacity"],[name="default_tiled"]'
+  ).forEach(el => {
+    el.addEventListener('input',  drawPreview);
+    el.addEventListener('change', drawPreview);
+  });
+
+  drawPreview();
+}());
 </script>
 </body>
 </html>
