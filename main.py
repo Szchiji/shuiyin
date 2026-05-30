@@ -239,6 +239,30 @@ async def logout(request: Request):
     return RedirectResponse("/login", status_code=302)
 
 
+@app.get("/autologin")
+async def autologin(request: Request, token: str = ""):
+    """One-click login via magic link sent by the Telegram bot.
+
+    The bot embeds the user's web_token in the URL so the user never has to
+    copy/paste anything.  Role (admin / member / regular) is detected
+    automatically from the database and ADMIN_IDS.
+    """
+    if not token:
+        return RedirectResponse("/login", status_code=302)
+
+    u = _db.get_user_by_token(token.strip())
+    if not u:
+        return templates.TemplateResponse(
+            request, "login.html", {"error": "链接已失效，请在 Telegram 机器人重新发送 /webtoken 获取新链接"}
+        )
+
+    request.session["user_id"] = u["user_id"]
+    role = _db.get_effective_role(u["user_id"], ADMIN_IDS)
+    if role == "admin":
+        return RedirectResponse("/admin", status_code=302)
+    return RedirectResponse("/dashboard", status_code=302)
+
+
 # ── Home redirect ─────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
