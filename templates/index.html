@@ -190,6 +190,78 @@
       border-top: 1px solid #eee;
       margin: 24px 0 20px;
     }
+
+    /* ── Preview & drag positioning ────────────────────────────────────── */
+    #preview-wrap { display: none; margin: 10px 0 6px; }
+
+    .preview-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: .78rem;
+      color: #888;
+      margin-bottom: 6px;
+    }
+
+    #pos-readout { color: #4f8ef7; font-weight: 600; }
+
+    #preview-container {
+      position: relative;
+      width: 100%;
+      height: 280px;
+      background: #1a1a2e;
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+
+    #preview-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    #wm-drag {
+      position: absolute;
+      background: rgba(0,0,0,.38);
+      color: rgba(255,255,255,.92);
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: .82rem;
+      white-space: nowrap;
+      max-width: 75%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: grab;
+      border: 1.5px dashed rgba(255,255,255,.8);
+      transform: translate(-50%, -50%);
+      left: 88%; top: 88%;
+      user-select: none;
+      touch-action: none;
+      z-index: 10;
+      transition: box-shadow .1s;
+    }
+
+    #wm-drag:active { cursor: grabbing; box-shadow: 0 0 0 2px #4f8ef7; }
+    #wm-drag.hidden { display: none; }
+
+    #tiled-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,.55);
+      color: #fff;
+      font-size: .88rem;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      pointer-events: none;
+    }
+
+    #tiled-overlay.active { display: flex; }
   </style>
 </head>
 <body>
@@ -206,6 +278,20 @@
       <p class="hint">支持 jpg / png / webp / mp4 / mov，最大 200 MB（超出将被拒绝）</p>
     </div>
 
+    <!-- 图片预览 & 拖动定位 -->
+    <div id="preview-wrap">
+      <div class="preview-label">
+        <span>📍 拖动水印标签调整位置，或点击图片直接定位</span>
+        <span id="pos-readout"></span>
+      </div>
+      <div id="preview-container">
+        <img id="preview-img" src="" alt="预览" draggable="false" />
+        <div id="wm-drag">© Wei</div>
+        <div id="tiled-overlay">🔲 全图平铺模式，位置不生效</div>
+      </div>
+      <p class="hint" style="margin-top:5px;">仅图片支持拖动定位；位置会精确映射到原图</p>
+    </div>
+
     <hr class="divider" />
 
     <!-- 水印文字 -->
@@ -215,7 +301,7 @@
     </div>
 
     <!-- 水印位置 -->
-    <div class="field">
+    <div class="field" id="position-field">
       <label for="position">水印位置</label>
       <select id="position" name="position">
         <option value="右下" selected>右下角</option>
@@ -251,6 +337,10 @@
       <input type="file" id="logo" name="logo" accept=".jpg,.jpeg,.png,.webp" />
       <p class="hint">上传后将用 Logo 替代文字水印</p>
     </div>
+
+    <!-- Hidden: custom drag position (set by JS, image only) -->
+    <input type="hidden" id="pos_x" name="pos_x" value="" />
+    <input type="hidden" id="pos_y" name="pos_y" value="" />
 
     <!-- 提交 -->
     <button type="submit" class="btn" id="submit-btn">开始添加水印</button>
@@ -297,6 +387,16 @@
     fd.delete('tiled');
     fd.append('tiled', tiledChecked ? 'true' : 'false');
 
+    // Custom drag position — only send for images with a valid position set
+    const _posX = document.getElementById('pos_x').value;
+    const _posY = document.getElementById('pos_y').value;
+    fd.delete('pos_x');
+    fd.delete('pos_y');
+    if (_posX && _posY && !tiledChecked) {
+      fd.append('pos_x', _posX);
+      fd.append('pos_y', _posY);
+    }
+
     try {
       const resp = await fetch('/add_watermark', { method: 'POST', body: fd });
       const data = await resp.json();
@@ -319,6 +419,147 @@
       submitBtn.disabled = false;
     }
   });
+</script>
+
+<script>
+// ── Preview & drag positioning ──────────────────────────────────────────────
+const previewWrap      = document.getElementById('preview-wrap');
+const previewContainer = document.getElementById('preview-container');
+const previewImg       = document.getElementById('preview-img');
+const wmDrag           = document.getElementById('wm-drag');
+const tiledOverlay     = document.getElementById('tiled-overlay');
+const posXInput        = document.getElementById('pos_x');
+const posYInput        = document.getElementById('pos_y');
+const posReadout       = document.getElementById('pos-readout');
+const textInput        = document.getElementById('text');
+const tiledCheck       = document.getElementById('tiled');
+const positionField    = document.getElementById('position-field');
+const positionSelect   = document.getElementById('position');
+const logoInput        = document.getElementById('logo');
+
+const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+
+// Preset snap positions: center of watermark as % of image dimensions
+const SNAP = {
+  '右下': [88, 88], '左上': [12, 12],
+  '右上': [88, 12], '左下': [12, 88], '居中': [50, 50],
+};
+
+/**
+ * Returns the rendered image rectangle inside the container,
+ * accounting for object-fit: contain letterboxing.
+ */
+function getImageRect() {
+  const cw = previewContainer.clientWidth;
+  const ch = previewContainer.clientHeight;
+  const nw = previewImg.naturalWidth  || cw;
+  const nh = previewImg.naturalHeight || ch;
+  const imgR = nw / nh;
+  const conR = cw / ch;
+  let rw, rh, rx, ry;
+  if (imgR > conR) { rw = cw; rh = cw / imgR; rx = 0; ry = (ch - rh) / 2; }
+  else             { rh = ch; rw = ch * imgR; ry = 0; rx = (cw - rw) / 2; }
+  return { x: rx, y: ry, w: rw, h: rh };
+}
+
+/**
+ * Move the drag handle to the given image-relative percentage (0–100),
+ * and update the hidden form inputs.
+ */
+function placeDragAt(pctX, pctY) {
+  const r = getImageRect();
+  wmDrag.style.left = (r.x + r.w * pctX / 100) + 'px';
+  wmDrag.style.top  = (r.y + r.h * pctY / 100) + 'px';
+  posXInput.value = pctX.toFixed(2);
+  posYInput.value = pctY.toFixed(2);
+  posReadout.textContent = `X ${Math.round(pctX)}%  Y ${Math.round(pctY)}%`;
+}
+
+function snapToPreset(name) {
+  const c = SNAP[name] || SNAP['右下'];
+  placeDragAt(c[0], c[1]);
+}
+
+function updateWmLabel() {
+  const hasLogo = logoInput.files && logoInput.files[0];
+  wmDrag.textContent = hasLogo ? '🖼 Logo' : (textInput.value.trim() || '水印');
+}
+
+function updateTiledUI() {
+  const on = tiledCheck.checked;
+  wmDrag.classList.toggle('hidden', on);
+  tiledOverlay.classList.toggle('active', on);
+}
+
+// ── File change → show / hide preview ──────────────────────────────────────
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files[0];
+  if (!f) { previewWrap.style.display = 'none'; return; }
+  const ext = f.name.split('.').pop().toLowerCase();
+  if (IMAGE_EXTS.has(ext)) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      previewImg.onload = () => {
+        previewWrap.style.display  = 'block';
+        positionField.style.display = 'none';
+        posXInput.value = '';
+        posYInput.value = '';
+        updateWmLabel();
+        updateTiledUI();
+        snapToPreset(positionSelect.value);
+      };
+      previewImg.src = ev.target.result;
+    };
+    reader.readAsDataURL(f);
+  } else {
+    previewWrap.style.display   = 'none';
+    positionField.style.display = '';
+    posXInput.value = '';
+    posYInput.value = '';
+  }
+});
+
+// ── Sync controls → preview ─────────────────────────────────────────────────
+textInput.addEventListener('input',  updateWmLabel);
+logoInput.addEventListener('change', updateWmLabel);
+tiledCheck.addEventListener('change', updateTiledUI);
+
+positionSelect.addEventListener('change', () => {
+  if (previewWrap.style.display !== 'none') snapToPreset(positionSelect.value);
+});
+
+// ── Click on preview → set position ────────────────────────────────────────
+previewContainer.addEventListener('click', (e) => {
+  if (wmDrag.contains(e.target) || tiledCheck.checked) return;
+  const cr = previewContainer.getBoundingClientRect();
+  const ir = getImageRect();
+  const pctX = Math.max(2, Math.min(98, (e.clientX - cr.left  - ir.x) / ir.w * 100));
+  const pctY = Math.max(2, Math.min(98, (e.clientY - cr.top   - ir.y) / ir.h * 100));
+  placeDragAt(pctX, pctY);
+});
+
+// ── Drag the watermark label ────────────────────────────────────────────────
+let _dragging = false;
+
+wmDrag.addEventListener('mousedown',  (e) => { e.preventDefault(); e.stopPropagation(); _dragging = true; });
+wmDrag.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); _dragging = true; }, { passive: false });
+
+function _applyDrag(clientX, clientY) {
+  const cr = previewContainer.getBoundingClientRect();
+  const ir = getImageRect();
+  const pctX = Math.max(2, Math.min(98, (clientX - cr.left - ir.x) / ir.w * 100));
+  const pctY = Math.max(2, Math.min(98, (clientY - cr.top  - ir.y) / ir.h * 100));
+  placeDragAt(pctX, pctY);
+}
+
+document.addEventListener('mousemove', (e) => {
+  if (_dragging) _applyDrag(e.clientX, e.clientY);
+});
+document.addEventListener('touchmove', (e) => {
+  if (_dragging) { e.preventDefault(); _applyDrag(e.touches[0].clientX, e.touches[0].clientY); }
+}, { passive: false });
+document.addEventListener('mouseup',  () => { _dragging = false; });
+document.addEventListener('touchend', () => { _dragging = false; });
 </script>
 </body>
 </html>
