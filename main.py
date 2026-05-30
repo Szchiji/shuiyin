@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 import time
+import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime
 from functools import wraps
@@ -237,6 +238,34 @@ async def login_post(
 async def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=302)
+
+
+@app.get("/autologin")
+async def autologin(request: Request, token: str = ""):
+    """One-click login via magic link sent by the Telegram bot.
+
+    The bot embeds the user's web_token in the URL so the user never has to
+    copy/paste anything.  Role (admin / member / regular) is detected
+    automatically from the database and ADMIN_IDS.
+    """
+    # Validate token format: token_urlsafe(24) produces 32 URL-safe base64 chars
+    _TOKEN_RE = re.compile(r'^[A-Za-z0-9\-_]{20,64}$')
+    if not token or not _TOKEN_RE.match(token.strip()):
+        return RedirectResponse("/login", status_code=302)
+
+    u = _db.get_user_by_token(token.strip())
+    if not u:
+        return templates.TemplateResponse(
+            request, "login.html", {"error": "链接已失效，请在 Telegram 机器人重新发送 /webtoken 获取新链接"}
+        )
+
+    # Prevent session fixation: clear any existing session before setting new identity
+    request.session.clear()
+    request.session["user_id"] = u["user_id"]
+    role = _db.get_effective_role(u["user_id"], ADMIN_IDS)
+    if role == "admin":
+        return RedirectResponse("/admin", status_code=302)
+    return RedirectResponse("/dashboard", status_code=302)
 
 
 # ── Home redirect ─────────────────────────────────────────────────────────────

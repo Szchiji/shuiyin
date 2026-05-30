@@ -19,6 +19,7 @@ import logging
 import os
 import pathlib
 import tempfile
+import urllib.parse
 
 import db
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -100,7 +101,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "📌 使用方法：\n"
         "1️⃣ /template — 设置水印模板（文字或图片）\n"
         "2️⃣ /settings — 调整位置、透明度、平铺等参数\n"
-        "3️⃣ 直接发送图片或视频，机器人自动添加水印返回\n\n"
+        "3️⃣ 直接发送图片或视频，机器人自动添加水印返回\n"
+        "4️⃣ /webtoken — 获取网页后台一键登录链接\n\n"
     )
     if role == "regular":
         used, limit = db.get_daily_usage(user.id)
@@ -179,6 +181,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/template — 设置水印模板（文字 或 图片 Logo）\n"
         "/settings — 调整水印位置、透明度、平铺\n"
         "/status — 查看当前身份、使用次数和水印设置\n"
+        "/webtoken — 获取网页后台一键登录链接\n"
         "/help — 显示此帮助\n\n"
         "📷 直接发送图片或视频即可添加水印\n"
     )
@@ -291,13 +294,17 @@ async def cmd_webtoken(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user = update.effective_user
     db.ensure_user(user.id, user.username or "", user.first_name or "")
     token = db.generate_web_token(user.id)
-    web_url = os.getenv("WEB_URL", "http://localhost:8000")
+    web_url = os.getenv("WEB_URL", "http://localhost:8000").rstrip("/")
+    login_url = f"{web_url}/autologin?token={urllib.parse.quote(token, safe='')}"
+    role = db.get_effective_role(user.id, ADMIN_IDS)
+    role_label = {"admin": "👑 管理员", "member": "⭐ 会员", "regular": "👤 普通用户"}.get(role, "👤 普通用户")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🌐 一键登录后台", url=login_url)]])
     await update.message.reply_text(
-        f"🔑 你的网页登录令牌：\n\n<code>{token}</code>\n\n"
-        f"在网页登录页输入你的 Telegram ID <code>{user.id}</code> 和上方令牌即可登录。\n"
-        f"🌐 网址：{web_url}/login\n\n"
-        "⚠️ 令牌仅供本人使用，请勿分享给他人。每次发送此命令会刷新令牌。",
+        f"🔑 点击下方按钮即可自动登录后台，无需输入任何密码。\n\n"
+        f"当前身份：{role_label}\n\n"
+        "⚠️ 链接仅供本人使用，请勿分享给他人。每次发送此命令会刷新链接。",
         parse_mode="HTML",
+        reply_markup=kb,
     )
 
 
