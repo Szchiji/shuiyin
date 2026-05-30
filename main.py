@@ -67,24 +67,24 @@ async def lifespan(app: FastAPI):
     if os.getenv("BOT_TOKEN"):
         try:
             from bot import build_application  # noqa: PLC0415
-            bot_app = build_application()
-            await bot_app.initialize()
-            await bot_app.start()
+            bot_application = build_application()
+            await bot_application.initialize()
+            await bot_application.start()
             if WEBHOOK_URL:
                 # Webhook mode: Telegram POSTs updates to our endpoint.
                 # This avoids the "Conflict: terminated by other getUpdates
                 # request" error that occurs when multiple instances (e.g.
                 # during a rolling deploy) each try to poll simultaneously.
                 token = os.getenv("BOT_TOKEN")
-                await bot_app.bot.set_webhook(
+                await bot_application.bot.set_webhook(
                     url=f"{WEBHOOK_URL}/telegram-webhook/{token}"
                 )
                 logger.info("Telegram 机器人已启动（webhook 模式）")
             else:
                 # Polling mode: suitable for local development only.
-                await bot_app.updater.start_polling()
+                await bot_application.updater.start_polling()
                 logger.info("Telegram 机器人已启动（polling 模式）")
-            _bot_app = bot_app
+            _bot_app = bot_application
         except Exception as e:
             logger.error("Telegram 机器人启动失败: %s", e)
     yield
@@ -180,12 +180,19 @@ async def telegram_webhook(token: str, request: Request):
     The bot token in the path acts as a shared secret so that only Telegram
     (which knows the token) can post updates here.
     """
-    if token != os.getenv("BOT_TOKEN") or _bot_app is None:
+    import secrets as _secrets  # noqa: PLC0415
+    bot_token = os.getenv("BOT_TOKEN", "")
+    # Capture local reference before any await so shutdown cannot null it out.
+    bot_application = _bot_app
+    if not _secrets.compare_digest(token, bot_token) or bot_application is None:
         raise HTTPException(status_code=403, detail="Forbidden")
     from telegram import Update  # noqa: PLC0415
-    data = await request.json()
-    update = Update.de_json(data, _bot_app.bot)
-    await _bot_app.process_update(update)
+    try:
+        data = await request.json()
+        update = Update.de_json(data, bot_application.bot)
+        await bot_application.process_update(update)
+    except Exception as exc:
+        logger.error("处理 Telegram webhook 更新时出错: %s", exc)
     return {"ok": True}
 
 
