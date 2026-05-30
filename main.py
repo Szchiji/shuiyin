@@ -9,7 +9,7 @@ import time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime
-from functools import wraps
+from functools import partial, wraps
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -411,9 +411,8 @@ async def add_watermark(
         loop = asyncio.get_event_loop()
         success = await loop.run_in_executor(
             None,
-            lambda: add_watermark_to_video(
-                input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size
-            ),
+            partial(add_watermark_to_video,
+                    input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size),
         )
 
     # Clean up uploaded originals immediately
