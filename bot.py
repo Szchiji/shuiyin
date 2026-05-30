@@ -465,8 +465,8 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
         if remaining == 0:
             limit_note = "\n⚠️ 今日次数已用完，明天再来吧！"
-        elif remaining <= 1:
-            limit_note = f"\n（今日剩余 {remaining} 次）"
+        elif remaining == 1:
+            limit_note = "\n（今日剩余 1 次）"
 
     # ── Resolve watermark params from saved template ──────────────────────────
     s = db.get_watermark_settings(user_id)
@@ -537,7 +537,8 @@ async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYP
         if update.message.document:
             fname = update.message.document.file_name or ""
             ext = pathlib.Path(fname).suffix.lstrip(".").lower()
-            if ext not in {"png", "jpg", "jpeg", "webp", "gif", ""}:
+            # Accept common image types; empty extension is ambiguous so we allow it
+            if ext and ext not in {"png", "jpg", "jpeg", "webp", "gif"}:
                 await update.message.reply_text("❌ 请发送图片文件（png/jpg/webp）作为水印 Logo。")
                 return
         await _save_logo(update, context)
