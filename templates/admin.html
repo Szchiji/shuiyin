@@ -436,10 +436,10 @@ function confirmRevoke(form) {
 const sidebar = document.getElementById('sidebar');
 const overlay = document.getElementById('sidebar-overlay');
 const icon    = document.getElementById('sidebar-icon');
-const isMobile = () => window.innerWidth <= 640;
+const mobileQuery = window.matchMedia('(max-width: 640px)');
 
 function toggleSidebar() {
-  if (isMobile()) {
+  if (mobileQuery.matches) {
     const open = !sidebar.classList.contains('collapsed');
     open ? closeSidebar() : openSidebar();
   } else {
@@ -458,12 +458,12 @@ function closeSidebar() {
   icon.textContent = '☰';
 }
 function closeSidebarMobile() {
-  if (isMobile()) closeSidebar();
+  if (mobileQuery.matches) closeSidebar();
 }
 
 // On desktop restore state from localStorage; on mobile default closed
 (function () {
-  if (isMobile()) {
+  if (mobileQuery.matches) {
     closeSidebar();
   } else {
     const saved = localStorage.getItem('admin-sidebar');
@@ -476,9 +476,9 @@ function closeSidebarMobile() {
   }
 })();
 
-// Persist desktop state
-sidebar.addEventListener('transitionend', () => {
-  if (!isMobile()) {
+// Persist desktop state — guard against multiple transitionend firings
+sidebar.addEventListener('transitionend', (e) => {
+  if (e.target === sidebar && !mobileQuery.matches) {
     localStorage.setItem('admin-sidebar', sidebar.classList.contains('collapsed') ? 'collapsed' : 'open');
   }
 });
