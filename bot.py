@@ -19,6 +19,7 @@ import logging
 import os
 import pathlib
 import tempfile
+import urllib.parse
 
 import db
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -294,7 +295,7 @@ async def cmd_webtoken(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     db.ensure_user(user.id, user.username or "", user.first_name or "")
     token = db.generate_web_token(user.id)
     web_url = os.getenv("WEB_URL", "http://localhost:8000").rstrip("/")
-    login_url = f"{web_url}/autologin?token={token}"
+    login_url = f"{web_url}/autologin?token={urllib.parse.quote(token, safe='')}"
     role = db.get_effective_role(user.id, ADMIN_IDS)
     role_label = {"admin": "👑 管理员", "member": "⭐ 会员", "regular": "👤 普通用户"}.get(role, "👤 普通用户")
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🌐 一键登录后台", url=login_url)]])
