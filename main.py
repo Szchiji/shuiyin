@@ -592,6 +592,25 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
 
 # ── Video watermark ──────────────────────────────────────────────────────────
 
+def _make_positioned_watermark_image(text, video_w, video_h, opacity, font_path, position, pos_x=None, pos_y=None):
+    """Build a full-frame RGBA PIL image with text at the specified position."""
+    try:
+        font = ImageFont.truetype(font_path, int(video_h / 22))
+    except (IOError, OSError, ValueError, RuntimeError) as e:
+        print(f"视频水印字体加载失败，使用默认字体: {e}")
+        font = ImageFont.load_default()
+
+    layer = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    alpha = int(255 * opacity / 100)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    pos = get_position(position, video_w, video_h, tw, th, pos_x=pos_x, pos_y=pos_y)
+    draw.text((pos[0] + 2, pos[1] + 2), text, fill=(0, 0, 0, alpha), font=font)
+    draw.text(pos, text, fill=(255, 255, 255, alpha), font=font)
+    return layer
+
+
 def _make_tiled_watermark_image(text, video_w, video_h, opacity, font_path):
     """Build a full-frame RGBA PIL image with tiled text, same logic as image path."""
     try:
@@ -654,37 +673,31 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
                         os.remove(tmp_overlay)
                 return True
             else:
-                from moviepy.editor import TextClip
+                overlay_img = _make_positioned_watermark_image(
+                    text, clip.w, clip.h, opacity, FONT_PATH, position, pos_x=pos_x, pos_y=pos_y
+                )
+                tmp_fd, tmp_overlay = tempfile.mkstemp(suffix=".png")
+                os.close(tmp_fd)
                 try:
-                    font_arg = "simhei"
-                    txt_clip = TextClip(
-                        text, fontsize=clip.h // 25, color="white",
-                        font=font_arg, stroke_color="black", stroke_width=2,
+                    overlay_img.save(tmp_overlay)
+                    overlay_clip = (
+                        ImageClip(tmp_overlay)
+                        .set_duration(clip.duration)
                     )
-                except Exception as e:
-                    print(f"TextClip 字体 '{font_arg}' 加载失败，使用默认字体: {e}")
-                    txt_clip = TextClip(
-                        text, fontsize=clip.h // 25, color="white",
-                        stroke_color="black", stroke_width=2,
+                    final = CompositeVideoClip([clip, overlay_clip])
+                    final.write_videofile(
+                        output_path,
+                        codec="libx264",
+                        audio_codec="aac",
+                        threads=os.cpu_count() or 4,
+                        preset="medium",
+                        verbose=False,
+                        logger=None,
                     )
-                txt_clip = txt_clip.set_opacity(opacity / 100).set_duration(clip.duration)
-                pos_map = {
-                    "左上": ("left", "top"),
-                    "右上": ("right", "top"),
-                    "左下": ("left", "bottom"),
-                    "右下": ("right", "bottom"),
-                    "居中": ("center", "center"),
-                }
-                if pos_x is not None and pos_y is not None:
-                    txt_w = txt_clip.w or 0
-                    txt_h = txt_clip.h or 0
-                    txt_clip = txt_clip.set_position((
-                        max(0, int(clip.w * pos_x / 100) - txt_w // 2),
-                        max(0, int(clip.h * pos_y / 100) - txt_h // 2),
-                    ))
-                else:
-                    txt_clip = txt_clip.set_position(pos_map.get(position, ("right", "bottom")))
-                final = CompositeVideoClip([clip, txt_clip])
+                finally:
+                    if os.path.exists(tmp_overlay):
+                        os.remove(tmp_overlay)
+                return True
 
         # Fix #5: use cpu_count() for encoding threads
         final.write_videofile(
