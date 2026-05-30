@@ -1,10 +1,12 @@
 import asyncio
+import logging
 import os
 import pathlib
 import re
 import shutil
 import tempfile
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -16,6 +18,8 @@ from moviepy.editor import CompositeVideoClip, ImageClip, VideoFileClip
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response
+
+logger = logging.getLogger(__name__)
 
 # ── Upload size limit middleware (200 MB) ────────────────────────────────────
 MAX_UPLOAD_SIZE = 200 * 1024 * 1024  # 200 MB
@@ -29,7 +33,31 @@ class LimitUploadSizeMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-app = FastAPI(title="水印小程序")
+# ── Lifespan: start Telegram bot if BOT_TOKEN is configured ─────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    bot_app = None
+    if os.getenv("BOT_TOKEN"):
+        try:
+            from bot import build_application  # noqa: PLC0415
+            bot_app = build_application()
+            await bot_app.initialize()
+            await bot_app.start()
+            await bot_app.updater.start_polling()
+            logger.info("Telegram 机器人已启动")
+        except Exception as e:
+            logger.error("Telegram 机器人启动失败: %s", e)
+            bot_app = None
+    yield
+    if bot_app is not None:
+        await bot_app.updater.stop()
+        await bot_app.stop()
+        await bot_app.shutdown()
+        logger.info("Telegram 机器人已停止")
+
+
+app = FastAPI(title="水印小程序", lifespan=lifespan)
 app.add_middleware(LimitUploadSizeMiddleware)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
