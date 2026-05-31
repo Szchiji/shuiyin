@@ -126,15 +126,21 @@ for d in ["uploads", "outputs", "fonts", "logos", "user_logos"]:
 
 def _find_cjk_font() -> str:
     """Locate a CJK-capable TrueType font, searching local dir then system paths."""
+    import subprocess as _subprocess
+
     # Preferred local copies (committed or placed at runtime)
     for name in ["wqy-zenhei.ttc", "simhei.ttf", "NotoSansCJK-Regular.ttc", "NotoSansSC-Regular.otf"]:
         p = os.path.join("fonts", name)
         if os.path.exists(p):
             return p
-    # Nix store (added via nixpacks wqy_zenhei package) — take first match
-    nix_match = next(iter(_glob.glob("/nix/store/*/share/fonts/truetype/wqy-zenhei.ttc")), None)
-    if nix_match:
-        return nix_match
+    # Nix store (added via nixpacks wqy_zenhei package) — try several patterns
+    for pattern in [
+        "/nix/store/*/share/fonts/truetype/wqy-zenhei.ttc",
+        "/nix/store/*/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    ]:
+        nix_match = next(iter(_glob.glob(pattern)), None)
+        if nix_match:
+            return nix_match
     # Common Linux system font paths
     candidates = [
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
@@ -146,7 +152,20 @@ def _find_cjk_font() -> str:
     for c in candidates:
         if os.path.exists(c):
             return c
-    return os.path.join("fonts", "simhei.ttf")  # fallback (may not render CJK)
+    # Use fontconfig (fc-list) to locate any CJK-capable font installed in the system
+    try:
+        result = _subprocess.run(
+            ["fc-list", ":lang=zh", "--format=%{file}\n"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                path = line.strip()
+                if path and os.path.exists(path):
+                    return path
+    except Exception:
+        pass
+    return os.path.join("fonts", "simhei.ttf")  # last resort fallback
 
 
 FONT_PATH = _find_cjk_font()
