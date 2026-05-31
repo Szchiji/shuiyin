@@ -564,7 +564,7 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
             logo = ImageEnhance.Brightness(logo).enhance(opacity / 100)
 
             if tiled:
-                step = max(lw, lh, 1)
+                step = int(max(lw, lh, 1) * 1.7)
                 for x in range(0, w, step):
                     for y in range(0, h, step):
                         img.paste(logo, (x, y), logo)
