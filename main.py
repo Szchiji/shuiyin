@@ -158,9 +158,7 @@ def _find_cjk_font() -> str:
     # On Railway/Nix the binary may not be on PATH; fall back to a Nix-store glob.
     _fc_list = shutil.which("fc-list")
     if _fc_list is None:
-        _nix_fc = _glob.glob("/nix/store/*/bin/fc-list")
-        if _nix_fc:
-            _fc_list = _nix_fc[0]
+        _fc_list = next(iter(_glob.glob("/nix/store/*/bin/fc-list")), None)
     if _fc_list:
         try:
             result = _subprocess.run(
