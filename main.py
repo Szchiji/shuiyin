@@ -665,6 +665,7 @@ async def admin_settings_save(
     default_text: str = Form("© Wei"),
     default_position: str = Form("右下"),
     default_opacity: int = Form(75),
+    default_font_size: int = Form(5),
     default_tiled: str = Form("0"),
     daily_limit: int = Form(3),
 ):
@@ -672,6 +673,7 @@ async def admin_settings_save(
         default_text=default_text,
         default_position=default_position,
         default_opacity=default_opacity,
+        default_font_size=max(1, min(15, default_font_size)),
         default_tiled="1" if default_tiled in ("1", "true", "on") else "0",
         daily_limit=daily_limit,
     )

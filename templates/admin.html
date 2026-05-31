@@ -425,6 +425,15 @@
           </div>
         </div>
         <div class="field">
+          <label>默认水印大小（占图高比例）</label>
+          <div class="opacity-row">
+            <input type="range" name="default_font_size" min="1" max="15"
+                   value="{{ sys_settings.default_font_size or '5' }}"
+                   oninput="this.nextElementSibling.textContent=this.value+'%'" />
+            <span class="opacity-val">{{ sys_settings.default_font_size or '5' }}%</span>
+          </div>
+        </div>
+        <div class="field">
           <label>默认平铺</label>
           <label class="checkbox-row">
             <input type="checkbox" name="default_tiled" value="1"
@@ -583,14 +592,16 @@ sidebar.addEventListener('transitionend', (e) => {
     const textEl   = document.querySelector('[name="default_text"]');
     const posEl    = document.querySelector('[name="default_position"]');
     const opEl     = document.querySelector('[name="default_opacity"]');
+    const fsEl     = document.querySelector('[name="default_font_size"]');
     const tiledEl  = document.querySelector('[name="default_tiled"]');
 
     const text    = textEl  ? (textEl.value.trim() || '水印') : '水印';
     const pos     = posEl   ? posEl.value  : '右下';
     const alpha   = opEl    ? parseInt(opEl.value) / 100 : 0.75;
     const tiled   = tiledEl ? tiledEl.checked : false;
+    const fsPct   = fsEl    ? Math.max(1, Math.min(15, parseInt(fsEl.value) || 5)) : 5;
 
-    const px = Math.max(12, Math.round(H * 0.05));   // 5% of image height
+    const px = Math.max(12, Math.round(H * fsPct / 100));
     ctx.font = `bold ${px}px "PingFang SC","Microsoft YaHei",sans-serif`;
     ctx.textBaseline = 'top';
     ctx.globalAlpha = alpha;
@@ -624,7 +635,7 @@ sidebar.addEventListener('transitionend', (e) => {
 
   // Listen to every settings control
   document.querySelectorAll(
-    '[name="default_text"],[name="default_position"],[name="default_opacity"],[name="default_tiled"]'
+    '[name="default_text"],[name="default_position"],[name="default_opacity"],[name="default_font_size"],[name="default_tiled"]'
   ).forEach(el => {
     el.addEventListener('input',  drawPreview);
     el.addEventListener('change', drawPreview);
