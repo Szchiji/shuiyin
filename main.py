@@ -560,16 +560,26 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
 
         if logo_path:
             logo = Image.open(logo_path).convert("RGBA")
+            logo_size = int(min(w, h) * max(5, min(100, logo_scale)) / 100)
             lw, lh = logo.size
+            if lw <= 0 or lh <= 0:
+                lw, lh = max(1, lw), max(1, lh)
+            if lw >= lh:
+                new_w = logo_size
+                new_h = max(1, int(lh * logo_size / lw))
+            else:
+                new_h = logo_size
+                new_w = max(1, int(lw * logo_size / lh))
+            logo = logo.resize((new_w, new_h), Image.Resampling.LANCZOS)
             logo = ImageEnhance.Brightness(logo).enhance(opacity / 100)
 
             if tiled:
-                step = int(max(lw, lh, 1) * 1.7)
+                step = int(logo_size * 1.7)
                 for x in range(0, w, step):
                     for y in range(0, h, step):
                         img.paste(logo, (x, y), logo)
             else:
-                pos = get_position(position, w, h, lw, lh, pos_x=pos_x, pos_y=pos_y)
+                pos = get_position(position, w, h, new_w, new_h, pos_x=pos_x, pos_y=pos_y)
                 img.paste(logo, pos, logo)
         else:
             px_size = max(12, int(h * font_size / 100))
