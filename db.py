@@ -89,6 +89,7 @@ def init_db() -> None:
             "default_text": "© Wei",
             "default_position": "右下",
             "default_opacity": "75",
+            "default_font_size": "5",
             "default_tiled": "0",
             "daily_limit": str(DAILY_LIMIT),
         }
@@ -140,13 +141,23 @@ def get_effective_role(user_id: int, admin_ids: set) -> str:
 
 # ── Usage counting ────────────────────────────────────────────────────────────
 
+def _get_daily_limit() -> int:
+    """Return the configured daily usage limit from system_settings."""
+    settings = get_system_settings()
+    try:
+        return max(1, int(settings.get("daily_limit", DAILY_LIMIT)))
+    except (ValueError, TypeError):
+        return DAILY_LIMIT
+
+
 def get_daily_usage(user_id: int) -> tuple[int, int]:
     """Return (used_today, daily_limit)."""
     today = date.today().isoformat()
+    limit = _get_daily_limit()
     u = get_user(user_id)
     if not u or u["last_reset"] != today:
-        return 0, DAILY_LIMIT
-    return u["daily_count"], DAILY_LIMIT
+        return 0, limit
+    return u["daily_count"], limit
 
 
 def check_and_increment_usage(user_id: int) -> tuple[bool, int]:
@@ -155,6 +166,7 @@ def check_and_increment_usage(user_id: int) -> tuple[bool, int]:
     Otherwise return (False, 0).
     """
     today = date.today().isoformat()
+    limit = _get_daily_limit()
     with _conn() as conn:
         row = conn.execute(
             "SELECT daily_count, last_reset FROM users WHERE user_id=?", (user_id,)
@@ -162,13 +174,13 @@ def check_and_increment_usage(user_id: int) -> tuple[bool, int]:
         if not row:
             return False, 0
         count = row["daily_count"] if row["last_reset"] == today else 0
-        if count >= DAILY_LIMIT:
+        if count >= limit:
             return False, 0
         conn.execute(
             "UPDATE users SET daily_count=?, last_reset=? WHERE user_id=?",
             (count + 1, today, user_id),
         )
-        return True, DAILY_LIMIT - count - 1
+        return True, limit - count - 1
 
 
 # ── Membership management ─────────────────────────────────────────────────────
