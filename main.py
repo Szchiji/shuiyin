@@ -136,6 +136,9 @@ def _find_cjk_font() -> str:
     for pattern in [
         "/nix/store/*/share/fonts/truetype/wqy-zenhei.ttc",
         "/nix/store/*/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/nix/store/*/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
+        "/nix/store/*/share/fonts/truetype/wqy*.ttc",
+        "/nix/store/*/share/fonts/truetype/*cjk*.ttc",
     ]:
         nix_match = next(iter(_glob.glob(pattern)), None)
         if nix_match:
@@ -151,19 +154,24 @@ def _find_cjk_font() -> str:
     for c in candidates:
         if os.path.exists(c):
             return c
-    # Use fontconfig (fc-list) to locate any CJK-capable font installed in the system
-    try:
-        result = _subprocess.run(
-            ["fc-list", ":lang=zh", "--format=%{file}\n"],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0:
-            for line in result.stdout.splitlines():
-                path = line.strip()
-                if path and os.path.exists(path):
-                    return path
-    except Exception as exc:
-        logging.getLogger(__name__).warning("fc-list 字体查找失败: %s", exc)
+    # Use fontconfig (fc-list) to locate any CJK-capable font installed in the system.
+    # On Railway/Nix the binary may not be on PATH; fall back to a Nix-store glob.
+    _fc_list = shutil.which("fc-list")
+    if _fc_list is None:
+        _fc_list = next(iter(_glob.glob("/nix/store/*/bin/fc-list")), None)
+    if _fc_list:
+        try:
+            result = _subprocess.run(
+                [_fc_list, ":lang=zh", "--format=%{file}\n"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    path = line.strip()
+                    if path and os.path.exists(path):
+                        return path
+        except Exception as exc:
+            logging.getLogger(__name__).warning("fc-list 字体查找失败: %s", exc)
     return os.path.join("fonts", "simhei.ttf")  # last resort fallback
 
 

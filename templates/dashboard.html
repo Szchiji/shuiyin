@@ -432,8 +432,8 @@
           </div>
         </div>
 
-        <div class="field">
-          <label>默认水印大小（占图高比例）</label>
+        <div class="field" id="tmpl-font-size-field">
+          <label>默认字体大小（占图高比例）</label>
           <div class="opacity-row">
             <input type="range" name="font_size" min="1" max="15" value="{{ settings.font_size or 5 }}"
                    oninput="this.nextElementSibling.textContent=this.value+'%'" />
@@ -467,6 +467,7 @@ function switchTab(name, btn) {
 function toggleLogoField() {
   const v = document.getElementById('tmpl-type').value;
   document.getElementById('tmpl-text-field').style.display = v === 'text' ? '' : 'none';
+  document.getElementById('tmpl-font-size-field').style.display = v === 'text' ? '' : 'none';
   document.getElementById('tmpl-logo-field').style.display = v === 'logo' ? '' : 'none';
   document.getElementById('tmpl-logo-scale-field').style.display = v === 'logo' ? '' : 'none';
 }
@@ -537,9 +538,12 @@ const tiledCheck = document.getElementById('tiled');
 const positionField = document.getElementById('position-field');
 const positionSelect = document.getElementById('position');
 const logoInput = document.getElementById('logo');
+const opacityInput  = document.getElementById('opacity');
+const fontSizeInput = document.getElementById('font_size');
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 const MIN_POS = 2, MAX_POS = 98;
+const MIN_FONT_PX = 12;
 const SNAP = { '右下': [88, 88], '左上': [12, 12], '右上': [88, 12], '左下': [12, 88], '中上': [50, 12], '中下': [50, 88], '居中': [50, 50] };
 
 function getImageRect() {
@@ -577,6 +581,14 @@ function updateTiledUI() {
   wmDrag.classList.toggle('hidden', on);
   tiledOverlay.classList.toggle('active', on);
 }
+function updateWmStyle() {
+  const op = Number(opacityInput.value) / 100;
+  const ir = getImageRect();
+  const containerH = ir.h > 0 ? ir.h : previewContainer.clientHeight;
+  const fs = Math.max(MIN_FONT_PX, containerH * Number(fontSizeInput.value) / 100);
+  wmDrag.style.opacity  = op;
+  wmDrag.style.fontSize = fs + 'px';
+}
 
 fileInput.addEventListener('change', () => {
   const f = fileInput.files[0];
@@ -592,6 +604,7 @@ fileInput.addEventListener('change', () => {
         posYInput.value = '';
         updateWmLabel();
         updateTiledUI();
+        updateWmStyle();
         snapToPreset(positionSelect.value);
       };
       previewImg.src = ev.target.result;
@@ -608,6 +621,8 @@ fileInput.addEventListener('change', () => {
 textInput.addEventListener('input', updateWmLabel);
 logoInput.addEventListener('change', updateWmLabel);
 tiledCheck.addEventListener('change', updateTiledUI);
+opacityInput.addEventListener('input',  () => { if (previewWrap.style.display !== 'none') updateWmStyle(); });
+fontSizeInput.addEventListener('input', () => { if (previewWrap.style.display !== 'none') updateWmStyle(); });
 positionSelect.addEventListener('change', () => { if (previewWrap.style.display !== 'none') snapToPreset(positionSelect.value); });
 
 previewContainer.addEventListener('click', (e) => {
