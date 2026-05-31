@@ -543,6 +543,7 @@ const fontSizeInput = document.getElementById('font_size');
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 const MIN_POS = 2, MAX_POS = 98;
+const MIN_FONT_PX = 12;
 const SNAP = { '右下': [88, 88], '左上': [12, 12], '右上': [88, 12], '左下': [12, 88], '中上': [50, 12], '中下': [50, 88], '居中': [50, 50] };
 
 function getImageRect() {
@@ -581,10 +582,10 @@ function updateTiledUI() {
   tiledOverlay.classList.toggle('active', on);
 }
 function updateWmStyle() {
-  const op = parseInt(opacityInput.value, 10) / 100;
+  const op = Number(opacityInput.value) / 100;
   const ir = getImageRect();
   const containerH = ir.h > 0 ? ir.h : previewContainer.clientHeight;
-  const fs = Math.max(12, containerH * parseInt(fontSizeInput.value, 10) / 100);
+  const fs = Math.max(MIN_FONT_PX, containerH * Number(fontSizeInput.value) / 100);
   wmDrag.style.opacity  = op;
   wmDrag.style.fontSize = fs + 'px';
 }
