@@ -71,6 +71,7 @@ def _wm_summary(s: dict) -> str:
         lines.append(f"• 大小：{s.get('logo_scale', 20)}%")
     else:
         lines.append(f"• 文字：{s['text']}")
+        lines.append(f"• 字号：{s.get('font_size', 5)}%")
     lines += [
         f"• 位置：{s['position']}",
         f"• 透明度：{s['opacity']}%",
@@ -86,6 +87,8 @@ def _settings_kb(s: dict) -> InlineKeyboardMarkup:
     ]
     if s.get("wm_type") == "logo":
         rows.append([InlineKeyboardButton(f"📐 大小: {s.get('logo_scale', 20)}%", callback_data="set_logo_scale")])
+    else:
+        rows.append([InlineKeyboardButton(f"🔤 字号: {s.get('font_size', 5)}%", callback_data="set_font_size")])
     rows += [
         [InlineKeyboardButton(f"🔆 透明度: {s['opacity']}%", callback_data="set_opacity")],
         [InlineKeyboardButton(f"🔲 平铺: {'开' if s['tiled'] else '关'}", callback_data="toggle_tiled")],
@@ -396,6 +399,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         s = db.get_watermark_settings(user_id)
         await query.edit_message_text(
             f"✅ 图片水印大小已设为：{new_scale}%\n\n{_wm_summary(s)}",
+            reply_markup=_settings_kb(s),
+        )
+
+    elif data == "set_font_size":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"{v}%", callback_data=f"font_size_{v}") for v in [3, 5, 7, 10]],
+            [InlineKeyboardButton(f"{v}%", callback_data=f"font_size_{v}") for v in [13, 15, 20, 25]],
+        ])
+        await query.edit_message_text("🔤 请选择文字水印字号（占图片高度的百分比）：", reply_markup=kb)
+
+    elif data.startswith("font_size_"):
+        parts = data.split("_")
+        if len(parts) != 3 or not parts[2].isdigit():
+            await query.answer("无效操作", show_alert=True)
+            return
+        new_size = int(parts[2])
+        db.save_watermark_settings(user_id, font_size=new_size)
+        s = db.get_watermark_settings(user_id)
+        await query.edit_message_text(
+            f"✅ 字号已设为：{new_size}%\n\n{_wm_summary(s)}",
             reply_markup=_settings_kb(s),
         )
 

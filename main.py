@@ -5,6 +5,7 @@ import os
 import pathlib
 import re
 import shutil
+import subprocess as _subprocess
 import tempfile
 import time as _time
 import urllib.parse
@@ -131,10 +132,14 @@ def _find_cjk_font() -> str:
         p = os.path.join("fonts", name)
         if os.path.exists(p):
             return p
-    # Nix store (added via nixpacks wqy_zenhei package) — take first match
-    nix_match = next(iter(_glob.glob("/nix/store/*/share/fonts/truetype/wqy-zenhei.ttc")), None)
-    if nix_match:
-        return nix_match
+    # Nix store (added via nixpacks wqy_zenhei package) — try several patterns
+    for pattern in [
+        "/nix/store/*/share/fonts/truetype/wqy-zenhei.ttc",
+        "/nix/store/*/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    ]:
+        nix_match = next(iter(_glob.glob(pattern)), None)
+        if nix_match:
+            return nix_match
     # Common Linux system font paths
     candidates = [
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
@@ -146,7 +151,20 @@ def _find_cjk_font() -> str:
     for c in candidates:
         if os.path.exists(c):
             return c
-    return os.path.join("fonts", "simhei.ttf")  # fallback (may not render CJK)
+    # Use fontconfig (fc-list) to locate any CJK-capable font installed in the system
+    try:
+        result = _subprocess.run(
+            ["fc-list", ":lang=zh", "--format=%{file}\n"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                path = line.strip()
+                if path and os.path.exists(path):
+                    return path
+    except Exception as exc:
+        logging.getLogger(__name__).warning("fc-list 字体查找失败: %s", exc)
+    return os.path.join("fonts", "simhei.ttf")  # last resort fallback
 
 
 FONT_PATH = _find_cjk_font()
