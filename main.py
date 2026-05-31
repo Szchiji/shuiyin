@@ -5,6 +5,7 @@ import os
 import pathlib
 import re
 import shutil
+import subprocess as _subprocess
 import tempfile
 import time as _time
 import urllib.parse
@@ -126,8 +127,6 @@ for d in ["uploads", "outputs", "fonts", "logos", "user_logos"]:
 
 def _find_cjk_font() -> str:
     """Locate a CJK-capable TrueType font, searching local dir then system paths."""
-    import subprocess as _subprocess
-
     # Preferred local copies (committed or placed at runtime)
     for name in ["wqy-zenhei.ttc", "simhei.ttf", "NotoSansCJK-Regular.ttc", "NotoSansSC-Regular.otf"]:
         p = os.path.join("fonts", name)
@@ -163,8 +162,8 @@ def _find_cjk_font() -> str:
                 path = line.strip()
                 if path and os.path.exists(path):
                     return path
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("fc-list 字体查找失败: %s", exc)
     return os.path.join("fonts", "simhei.ttf")  # last resort fallback
 
 

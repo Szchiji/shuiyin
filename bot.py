@@ -410,7 +410,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text("🔤 请选择文字水印字号（占图片高度的百分比）：", reply_markup=kb)
 
     elif data.startswith("font_size_"):
-        new_size = int(data.split("_")[2])
+        parts = data.split("_")
+        if len(parts) != 3 or not parts[2].isdigit():
+            await query.answer("无效操作", show_alert=True)
+            return
+        new_size = int(parts[2])
         db.save_watermark_settings(user_id, font_size=new_size)
         s = db.get_watermark_settings(user_id)
         await query.edit_message_text(
