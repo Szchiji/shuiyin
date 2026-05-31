@@ -6,7 +6,6 @@ import pathlib
 import re
 import shutil
 import tempfile
-import time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -42,6 +41,8 @@ if not SECRET_KEY:
         "生产环境请设置固定的 SECRET_KEY。"
     )
 WEB_ADMIN_PASSWORD = os.getenv("WEB_ADMIN_PASSWORD", "")
+# Set HTTPS_ONLY=true in production to ensure session cookies are sent only over HTTPS.
+_HTTPS_ONLY = os.getenv("HTTPS_ONLY", "false").lower() == "true"
 # Public HTTPS URL of this service, e.g. https://your-app.railway.app
 # When set, the bot uses webhook mode instead of polling (avoids Conflict errors
 # caused by multiple instances running simultaneously during rolling deploys).
@@ -115,7 +116,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="水印小程序", lifespan=lifespan)
 app.add_middleware(LimitUploadSizeMiddleware)
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, https_only=False)
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, https_only=_HTTPS_ONLY)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
@@ -197,11 +198,66 @@ def _require_admin(func):
     return wrapper
 
 
+# ── Rate limiting (admin login) ───────────────────────────────────────────────
+
+_MAX_LOGIN_ATTEMPTS = 5
+_LOGIN_LOCKOUT_SECONDS = 300  # 5 minutes
+# {ip: (fail_count, first_fail_timestamp)}
+_login_attempts: dict[str, tuple[int, float]] = {}
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _is_rate_limited(ip: str) -> bool:
+    import time as _time
+    entry = _login_attempts.get(ip)
+    if not entry:
+        return False
+    count, first_fail = entry
+    if _time.monotonic() - first_fail > _LOGIN_LOCKOUT_SECONDS:
+        _login_attempts.pop(ip, None)
+        return False
+    return count >= _MAX_LOGIN_ATTEMPTS
+
+
+def _record_login_failure(ip: str) -> None:
+    import time as _time
+    entry = _login_attempts.get(ip)
+    now = _time.monotonic()
+    if entry and _time.monotonic() - entry[1] <= _LOGIN_LOCKOUT_SECONDS:
+        _login_attempts[ip] = (entry[0] + 1, entry[1])
+    else:
+        _login_attempts[ip] = (1, now)
+
+
+def _clear_login_failures(ip: str) -> None:
+    _login_attempts.pop(ip, None)
+
+
+# ── Magic-bytes validation ────────────────────────────────────────────────────
+
+def _valid_magic_bytes(data: bytes, ext: str) -> bool:
+    """Return True if the file header matches the declared image extension."""
+    if ext in ("jpg", "jpeg"):
+        return data[:3] == b"\xff\xd8\xff"
+    if ext == "png":
+        return data[:8] == b"\x89PNG\r\n\x1a\n"
+    if ext == "webp":
+        return data[:4] == b"RIFF" and len(data) >= 12 and data[8:12] == b"WEBP"
+    # Video containers (mp4/mov) have variable signatures; skip deep check.
+    return True
+
+
 # ── Background cleanup ───────────────────────────────────────────────────────
 
-def cleanup_file(path: str, delay: int = 300):
-    """Sleep *delay* seconds, then delete *path* if it still exists."""
-    time.sleep(delay)
+async def cleanup_file(path: str, delay: int = 300):
+    """Sleep *delay* seconds asynchronously, then delete *path* if it still exists."""
+    await asyncio.sleep(delay)
     if os.path.exists(path):
         os.remove(path)
 
@@ -250,24 +306,39 @@ async def login_post(
     user_id: str = Form(...),
     credential: str = Form(...),
 ):
+    ip = _client_ip(request)
+
     if not _is_valid_telegram_id(user_id):
         return templates.TemplateResponse(request, "login.html", {"error": "Telegram ID 格式错误"})
+
+    if _is_rate_limited(ip):
+        return templates.TemplateResponse(
+            request, "login.html",
+            {"error": "登录尝试过于频繁，请 5 分钟后再试"},
+        )
 
     uid = int(user_id.strip())
 
     # Admin login via password
     if uid in ADMIN_IDS:
         if WEB_ADMIN_PASSWORD and credential.strip() == WEB_ADMIN_PASSWORD:
+            _clear_login_failures(ip)
             _db.ensure_user(uid)
             request.session["user_id"] = uid
             return RedirectResponse("/admin", status_code=302)
+        _record_login_failure(ip)
         return templates.TemplateResponse(request, "login.html", {"error": "管理员密码错误"})
 
     # Regular / member login via web token
-    u = _db.get_user(uid)
-    if not u or not u.get("web_token") or u["web_token"] != credential.strip():
-        return templates.TemplateResponse(request, "login.html", {"error": "令牌无效，请在 Telegram 机器人发送 /webtoken 获取"})
+    u = _db.get_user_by_token(credential.strip())
+    if not u or u["user_id"] != uid:
+        _record_login_failure(ip)
+        return templates.TemplateResponse(
+            request, "login.html",
+            {"error": "令牌无效或已过期，请在 Telegram 机器人重新发送 /webtoken 获取"},
+        )
 
+    _clear_login_failures(ip)
     request.session["user_id"] = uid
     return RedirectResponse("/dashboard", status_code=302)
 
@@ -316,6 +387,12 @@ async def home(request: Request):
     if u["role"] == "admin":
         return RedirectResponse("/admin", status_code=302)
     return RedirectResponse("/dashboard", status_code=302)
+
+
+@app.get("/health")
+async def health():
+    """Simple liveness probe for container/platform health checks."""
+    return {"status": "ok"}
 
 
 # ── User dashboard ────────────────────────────────────────────────────────────
@@ -413,6 +490,13 @@ async def add_watermark(
     if ext not in allowed_exts:
         raise HTTPException(status_code=400, detail="不支持的文件类型")
 
+    # Validate magic bytes for image uploads to reject disguised files
+    if ext in ("jpg", "jpeg", "png", "webp"):
+        header = await file.read(12)
+        await file.seek(0)
+        if not _valid_magic_bytes(header, ext):
+            raise HTTPException(status_code=400, detail="文件内容与扩展名不符")
+
     input_path = f"uploads/{timestamp}_{safe_filename}"
 
     with open(input_path, "wb") as buffer:
@@ -438,7 +522,7 @@ async def add_watermark(
         )
     elif ext in ["mp4", "mov"]:
         # Fix #7: run blocking video work in a thread-pool executor
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         success = await loop.run_in_executor(
             None,
             partial(add_watermark_to_video,

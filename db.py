@@ -4,7 +4,7 @@ import os
 import secrets
 import sqlite3
 from contextlib import contextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 DB_PATH = os.getenv("DB_PATH", "watermark_bot.db")
 
@@ -44,6 +44,12 @@ def init_db() -> None:
         # column already exists; re-raise for any other unexpected error.
         try:
             conn.execute("ALTER TABLE users ADD COLUMN web_token TEXT")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+        # Migrate: add web_token_expires_at column if missing.
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN web_token_expires_at TEXT")
         except sqlite3.OperationalError as e:
             if "duplicate column name" not in str(e).lower():
                 raise
@@ -251,19 +257,28 @@ def get_stats() -> dict:
 
 # ── Web token ─────────────────────────────────────────────────────────────────
 
+_WEB_TOKEN_EXPIRY_DAYS = 7
+
+
 def generate_web_token(user_id: int) -> str:
     """Generate (or refresh) a random web-login token for *user_id*. Returns the token."""
     token = secrets.token_urlsafe(24)
+    expires_at = (datetime.utcnow() + timedelta(days=_WEB_TOKEN_EXPIRY_DAYS)).isoformat()
     with _conn() as conn:
-        conn.execute("UPDATE users SET web_token=? WHERE user_id=?", (token, user_id))
+        conn.execute(
+            "UPDATE users SET web_token=?, web_token_expires_at=? WHERE user_id=?",
+            (token, expires_at, user_id),
+        )
     return token
 
 
 def get_user_by_token(token: str) -> dict | None:
-    """Return the user row whose web_token matches, or None."""
+    """Return the user row whose web_token matches and has not expired, or None."""
+    now = datetime.utcnow().isoformat()
     with _conn() as conn:
         row = conn.execute(
-            "SELECT * FROM users WHERE web_token=?", (token,)
+            "SELECT * FROM users WHERE web_token=? AND web_token_expires_at > ?",
+            (token, now),
         ).fetchone()
         return dict(row) if row else None
 
