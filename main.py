@@ -137,7 +137,8 @@ def _find_cjk_font() -> str:
         "/nix/store/*/share/fonts/truetype/wqy-zenhei.ttc",
         "/nix/store/*/share/fonts/truetype/wqy/wqy-zenhei.ttc",
         "/nix/store/*/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
-        "/nix/store/*/share/fonts/*.ttc",
+        "/nix/store/*/share/fonts/truetype/wqy*.ttc",
+        "/nix/store/*/share/fonts/truetype/*cjk*.ttc",
     ]:
         nix_match = next(iter(_glob.glob(pattern)), None)
         if nix_match:
