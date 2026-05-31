@@ -432,8 +432,8 @@
           </div>
         </div>
 
-        <div class="field">
-          <label>默认水印大小（占图高比例）</label>
+        <div class="field" id="tmpl-font-size-field">
+          <label>默认字体大小（占图高比例）</label>
           <div class="opacity-row">
             <input type="range" name="font_size" min="1" max="15" value="{{ settings.font_size or 5 }}"
                    oninput="this.nextElementSibling.textContent=this.value+'%'" />
@@ -467,6 +467,7 @@ function switchTab(name, btn) {
 function toggleLogoField() {
   const v = document.getElementById('tmpl-type').value;
   document.getElementById('tmpl-text-field').style.display = v === 'text' ? '' : 'none';
+  document.getElementById('tmpl-font-size-field').style.display = v === 'text' ? '' : 'none';
   document.getElementById('tmpl-logo-field').style.display = v === 'logo' ? '' : 'none';
   document.getElementById('tmpl-logo-scale-field').style.display = v === 'logo' ? '' : 'none';
 }
