@@ -1,4 +1,5 @@
 import asyncio
+import glob as _glob
 import logging
 import os
 import pathlib
@@ -123,15 +124,15 @@ for d in ["uploads", "outputs", "fonts", "logos", "user_logos"]:
 
 def _find_cjk_font() -> str:
     """Locate a CJK-capable TrueType font, searching local dir then system paths."""
-    import glob as _glob
     # Preferred local copies (committed or placed at runtime)
     for name in ["wqy-zenhei.ttc", "simhei.ttf", "NotoSansCJK-Regular.ttc", "NotoSansSC-Regular.otf"]:
         p = os.path.join("fonts", name)
         if os.path.exists(p):
             return p
-    # Nix store (added via nixpacks wqy_zenhei package)
-    for pat in _glob.glob("/nix/store/*/share/fonts/truetype/wqy-zenhei.ttc"):
-        return pat
+    # Nix store (added via nixpacks wqy_zenhei package) — take first match
+    nix_match = next(iter(_glob.glob("/nix/store/*/share/fonts/truetype/wqy-zenhei.ttc")), None)
+    if nix_match:
+        return nix_match
     # Common Linux system font paths
     candidates = [
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
