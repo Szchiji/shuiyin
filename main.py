@@ -6,6 +6,7 @@ import pathlib
 import re
 import shutil
 import tempfile
+import time as _time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -214,7 +215,6 @@ def _client_ip(request: Request) -> str:
 
 
 def _is_rate_limited(ip: str) -> bool:
-    import time as _time
     entry = _login_attempts.get(ip)
     if not entry:
         return False
@@ -226,10 +226,9 @@ def _is_rate_limited(ip: str) -> bool:
 
 
 def _record_login_failure(ip: str) -> None:
-    import time as _time
     entry = _login_attempts.get(ip)
     now = _time.monotonic()
-    if entry and _time.monotonic() - entry[1] <= _LOGIN_LOCKOUT_SECONDS:
+    if entry and now - entry[1] <= _LOGIN_LOCKOUT_SECONDS:
         _login_attempts[ip] = (entry[0] + 1, entry[1])
     else:
         _login_attempts[ip] = (1, now)
@@ -248,7 +247,7 @@ def _valid_magic_bytes(data: bytes, ext: str) -> bool:
     if ext == "png":
         return data[:8] == b"\x89PNG\r\n\x1a\n"
     if ext == "webp":
-        return data[:4] == b"RIFF" and len(data) >= 12 and data[8:12] == b"WEBP"
+        return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
     # Video containers (mp4/mov) have variable signatures; skip deep check.
     return True
 

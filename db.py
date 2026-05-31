@@ -4,7 +4,7 @@ import os
 import secrets
 import sqlite3
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 DB_PATH = os.getenv("DB_PATH", "watermark_bot.db")
 
@@ -263,7 +263,7 @@ _WEB_TOKEN_EXPIRY_DAYS = 7
 def generate_web_token(user_id: int) -> str:
     """Generate (or refresh) a random web-login token for *user_id*. Returns the token."""
     token = secrets.token_urlsafe(24)
-    expires_at = (datetime.utcnow() + timedelta(days=_WEB_TOKEN_EXPIRY_DAYS)).isoformat()
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=_WEB_TOKEN_EXPIRY_DAYS)).isoformat()
     with _conn() as conn:
         conn.execute(
             "UPDATE users SET web_token=?, web_token_expires_at=? WHERE user_id=?",
@@ -274,7 +274,7 @@ def generate_web_token(user_id: int) -> str:
 
 def get_user_by_token(token: str) -> dict | None:
     """Return the user row whose web_token matches and has not expired, or None."""
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     with _conn() as conn:
         row = conn.execute(
             "SELECT * FROM users WHERE web_token=? AND web_token_expires_at > ?",
