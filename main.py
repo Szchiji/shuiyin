@@ -1,5 +1,8 @@
 import asyncio
 import glob as _glob
+import hashlib
+import hmac
+import json
 import logging
 import os
 import pathlib
@@ -43,6 +46,7 @@ if not SECRET_KEY:
         "生产环境请设置固定的 SECRET_KEY。"
     )
 WEB_ADMIN_PASSWORD = os.getenv("WEB_ADMIN_PASSWORD", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 # Set HTTPS_ONLY=true in production to ensure session cookies are sent only over HTTPS.
 _HTTPS_ONLY = os.getenv("HTTPS_ONLY", "false").lower() == "true"
 # Public HTTPS URL of this service, e.g. https://your-app.railway.app
@@ -95,6 +99,20 @@ async def lifespan(app: FastAPI):
                 await bot_application.updater.start_polling()
                 logger.info("Telegram 机器人已启动（polling 模式）")
             _bot_app = bot_application
+            # Set the menu button to open the Mini App (requires HTTPS URL).
+            web_url = os.getenv("WEB_URL", "").rstrip("/")
+            if web_url:
+                try:
+                    from telegram import MenuButtonWebApp, WebAppInfo  # noqa: PLC0415
+                    await bot_application.bot.set_chat_menu_button(
+                        menu_button=MenuButtonWebApp(
+                            text="水印",
+                            web_app=WebAppInfo(url=web_url),
+                        )
+                    )
+                    logger.info("Telegram 机器人菜单按钮已设置为 Mini App: %s", web_url)
+                except Exception as e:
+                    logger.warning("设置 Mini App 菜单按钮失败: %s", e)
         except Exception as e:
             logger.error("Telegram 机器人启动失败: %s", e)
     yield
@@ -397,6 +415,58 @@ async def autologin(request: Request, token: str = ""):
     request.session.clear()
     request.session["user_id"] = u["user_id"]
     role = _db.get_effective_role(u["user_id"], ADMIN_IDS)
+    if role == "admin":
+        return RedirectResponse("/admin", status_code=302)
+    return RedirectResponse("/dashboard", status_code=302)
+
+
+# ── Telegram Mini App auth ────────────────────────────────────────────────────
+
+def _verify_webapp_init_data(init_data: str) -> dict | None:
+    """Verify Telegram WebApp initData HMAC and return the parsed user dict, or None on failure.
+
+    Verification algorithm: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+    """
+    if not BOT_TOKEN or not init_data:
+        return None
+    try:
+        params = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+        received_hash = params.pop("hash", None)
+        if not received_hash:
+            return None
+        data_check_string = "\n".join(
+            f"{k}={v}" for k, v in sorted(params.items())
+        )
+        secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+        expected_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_hash, received_hash):
+            return None
+        user_json = params.get("user")
+        if not user_json:
+            return None
+        return json.loads(user_json)
+    except Exception as exc:
+        logger.debug("webapp initData 验证异常: %s", exc)
+        return None
+
+
+@app.post("/webapp-auth")
+async def webapp_auth(request: Request, init_data: str = Form("")):
+    """Authenticate a Telegram Mini App user via initData HMAC verification."""
+    user_info = _verify_webapp_init_data(init_data)
+    if not user_info:
+        return templates.TemplateResponse(
+            request, "login.html", {"error": "Mini App 验证失败，请重试"}
+        )
+    user_id = int(user_info["id"])
+    _db.ensure_user(
+        user_id,
+        user_info.get("username", ""),
+        user_info.get("first_name", ""),
+    )
+    request.session.clear()
+    request.session["user_id"] = user_id
+    role = _db.get_effective_role(user_id, ADMIN_IDS)
     if role == "admin":
         return RedirectResponse("/admin", status_code=302)
     return RedirectResponse("/dashboard", status_code=302)
