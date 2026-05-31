@@ -34,7 +34,7 @@ from telegram.ext import (
 
 logger = logging.getLogger(__name__)
 
-POSITIONS = ["左上", "右上", "左下", "右下", "居中"]
+POSITIONS = ["左上", "右上", "左下", "右下", "居中", "中上", "中下"]
 LOGO_DIR = "user_logos"
 
 # ── Admin IDs (loaded once at import time) ────────────────────────────────────
@@ -534,7 +534,7 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
             await tg_file.download_to_drive(input_path)
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             if is_video:
                 success = await loop.run_in_executor(
                     None,

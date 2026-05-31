@@ -64,6 +64,7 @@ python main.py
 | `ADMIN_USERNAME` | 可选 | 显示给普通用户的管理员联系方式（不含 @），如 `myname` |
 | `WEB_URL` | 可选 | 网站公开 URL，用于 `/webtoken` 回复中的链接，如 `https://your-domain.com` |
 | `WEBHOOK_URL` | 可选 | 机器人 Webhook 公开 HTTPS URL，如 `https://your-domain.com`。设置后机器人改用 webhook 模式接收消息，避免多实例部署时的轮询冲突；不设置则使用 polling（仅适合本地开发） |
+| `HTTPS_ONLY` | 可选 | 设为 `true` 时，Session Cookie 仅通过 HTTPS 发送（生产环境强烈建议开启） |
 
 设置 `BOT_TOKEN` 后，机器人将在 Web 服务启动时自动一起启动。
 
@@ -127,6 +128,12 @@ python main.py
 - 📊 概览：用户总数、会员数、今日活跃统计
 - 👥 用户管理：搜索用户、授权/撤销会员资格
 - ⚙️ 系统设置：修改默认水印参数和普通用户每日限额
+
+---
+
+## 健康检查
+
+`GET /health` 返回 `{"status": "ok"}`，可用于容器或 Railway 的健康探针配置。
 
 ---
 
