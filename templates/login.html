@@ -131,7 +131,11 @@
     // Running inside Telegram Mini App — auto-login silently
     var manualLogin = document.getElementById('manual-login');
     if (manualLogin) {
-      manualLogin.innerHTML = '<p class="loading">⏳ 正在自动登录…</p>';
+      manualLogin.style.display = 'none';
+      var msg = document.createElement('p');
+      msg.className = 'loading';
+      msg.textContent = '⏳ 正在自动登录…';
+      manualLogin.parentNode.insertBefore(msg, manualLogin);
     }
     document.getElementById('init_data').value = tg.initData;
     document.getElementById('webapp-form').submit();

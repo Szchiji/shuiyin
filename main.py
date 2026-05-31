@@ -445,7 +445,8 @@ def _verify_webapp_init_data(init_data: str) -> dict | None:
         if not user_json:
             return None
         return json.loads(user_json)
-    except Exception:
+    except Exception as exc:
+        logger.debug("webapp initData 验证异常: %s", exc)
         return None
 
 
