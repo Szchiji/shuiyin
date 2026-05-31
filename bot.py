@@ -19,7 +19,6 @@ import logging
 import os
 import pathlib
 import tempfile
-import time
 import urllib.parse
 
 import db
@@ -530,7 +529,7 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, f"input.{ext}")
-            output_ext = "mp4" if is_video else "png"
+            output_ext = "mp4" if is_video else "jpg"
             output_path = os.path.join(tmpdir, f"output.{output_ext}")
 
             await tg_file.download_to_drive(input_path)
@@ -565,7 +564,7 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     await update.message.reply_video(f, caption=caption_out)
             else:
                 with open(output_path, "rb") as f:
-                    await update.message.reply_document(f, filename=f"watermarked_{int(time.time())}.png", caption=caption_out)
+                    await update.message.reply_photo(f, caption=caption_out)
 
     except Exception as e:
         logger.error("处理媒体失败: %s", e, exc_info=True)
