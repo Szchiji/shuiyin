@@ -1,4 +1,5 @@
 import asyncio
+import glob as _glob
 import logging
 import os
 import pathlib
@@ -121,7 +122,32 @@ templates = Jinja2Templates(directory="templates")
 for d in ["uploads", "outputs", "fonts", "logos", "user_logos"]:
     os.makedirs(d, exist_ok=True)
 
-FONT_PATH = "fonts/simhei.ttf"
+def _find_cjk_font() -> str:
+    """Locate a CJK-capable TrueType font, searching local dir then system paths."""
+    # Preferred local copies (committed or placed at runtime)
+    for name in ["wqy-zenhei.ttc", "simhei.ttf", "NotoSansCJK-Regular.ttc", "NotoSansSC-Regular.otf"]:
+        p = os.path.join("fonts", name)
+        if os.path.exists(p):
+            return p
+    # Nix store (added via nixpacks wqy_zenhei package) — take first match
+    nix_match = next(iter(_glob.glob("/nix/store/*/share/fonts/truetype/wqy-zenhei.ttc")), None)
+    if nix_match:
+        return nix_match
+    # Common Linux system font paths
+    candidates = [
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return os.path.join("fonts", "simhei.ttf")  # fallback (may not render CJK)
+
+
+FONT_PATH = _find_cjk_font()
 
 # Ensure DB is initialised on startup even when bot is not running
 _db.init_db()
