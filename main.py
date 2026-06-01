@@ -528,7 +528,7 @@ async def save_settings(
         safe_logo = pathlib.Path(logo.filename).name
         ext = safe_logo.rsplit(".", 1)[-1].lower() if "." in safe_logo else ""
         if ext not in {"jpg", "jpeg", "png", "webp"}:
-            raise HTTPException(status_code=400, detail="Logo 仅支持 jpg / png / webp 格式")
+            raise HTTPException(status_code=400, detail="Logo 仅支持 jpg / jpeg / png / webp 格式")
         logo_header = await logo.read(12)
         await logo.seek(0)
         if not _valid_magic_bytes(logo_header, ext):
@@ -610,7 +610,7 @@ async def add_watermark(
         safe_logo_filename = pathlib.Path(logo.filename).name
         ext_logo = safe_logo_filename.rsplit(".", 1)[-1].lower() if "." in safe_logo_filename else ""
         if ext_logo not in {"jpg", "jpeg", "png", "webp"}:
-            raise HTTPException(status_code=400, detail="Logo 仅支持 jpg / png / webp 格式")
+            raise HTTPException(status_code=400, detail="Logo 仅支持 jpg / jpeg / png / webp 格式")
         logo_header = await logo.read(12)
         await logo.seek(0)
         if not _valid_magic_bytes(logo_header, ext_logo):
