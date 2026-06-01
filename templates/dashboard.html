@@ -304,7 +304,7 @@
           <p class="hint" style="margin-top:5px;">仅图片支持拖动定位</p>
         </div>
 
-        <div class="field">
+        <div class="field" id="wm-text-field">
           <label>水印文字</label>
           <input type="text" id="wm-text" name="text" value="{{ settings.text or '© Wei' }}" />
         </div>
@@ -327,7 +327,7 @@
           </div>
         </div>
 
-        <div class="field">
+        <div class="field" id="font-size-field">
           <label>水印大小（占图高比例）</label>
           <div class="opacity-row">
             <input type="range" id="font_size" name="font_size" min="1" max="15" value="{{ settings.font_size or 5 }}"
@@ -347,7 +347,13 @@
         <div class="field">
           <label>Logo 图片（可选）</label>
           <input type="file" id="logo" name="logo" accept=".jpg,.jpeg,.png,.webp" />
+          {% if settings.wm_type == 'logo' and settings.logo_path %}
+          <p class="hint" id="saved-logo-notice" style="color:#27ae60;">✅ 已保存 Logo 模板，将自动使用（上传新文件可替换）</p>
+          {% else %}
           <p class="hint">上传后将用 Logo 替代文字水印</p>
+          {% endif %}
+          <input type="hidden" id="use-saved-logo" name="use_saved_logo"
+                 value="{{ 'true' if settings.wm_type == 'logo' and settings.logo_path else 'false' }}" />
         </div>
 
         <!-- Logo 大小（仅 Logo 模式显示） -->
@@ -570,11 +576,15 @@ function snapToPreset(name) {
   placeDragAt(c[0], c[1]);
 }
 function updateWmLabel() {
-  const hasLogo = logoInput.files && logoInput.files[0];
+  const useSavedLogoInput = document.getElementById('use-saved-logo');
+  const savedLogoMode = useSavedLogoInput && useSavedLogoInput.value === 'true';
+  const hasLogo = savedLogoMode || (logoInput.files && logoInput.files[0]);
   wmDrag.textContent = hasLogo
     ? '🖼 Logo'
     : (textInput.value.trim() || '水印');
   document.getElementById('logo-scale-field').style.display = hasLogo ? '' : 'none';
+  document.getElementById('font-size-field').style.display = hasLogo ? 'none' : '';
+  document.getElementById('wm-text-field').style.display = hasLogo ? 'none' : '';
 }
 function updateTiledUI() {
   const on = tiledCheck.checked;
@@ -619,7 +629,14 @@ fileInput.addEventListener('change', () => {
 });
 
 textInput.addEventListener('input', updateWmLabel);
-logoInput.addEventListener('change', updateWmLabel);
+logoInput.addEventListener('change', () => {
+  const useSavedLogoInput = document.getElementById('use-saved-logo');
+  if (useSavedLogoInput && logoInput.files && logoInput.files[0]) {
+    // User is uploading a new logo — stop using the saved template
+    useSavedLogoInput.value = 'false';
+  }
+  updateWmLabel();
+});
 tiledCheck.addEventListener('change', updateTiledUI);
 opacityInput.addEventListener('input',  () => { if (previewWrap.style.display !== 'none') updateWmStyle(); });
 fontSizeInput.addEventListener('input', () => { if (previewWrap.style.display !== 'none') updateWmStyle(); });
@@ -655,6 +672,10 @@ document.addEventListener('touchmove', (e) => {
 }, { passive: false });
 document.addEventListener('mouseup',  () => { isDragging = false; });
 document.addEventListener('touchend', () => { isDragging = false; });
+
+// Apply initial UI state based on saved template
+updateWmLabel();
+updateTiledUI();
 </script>
 </body>
 </html>
