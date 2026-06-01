@@ -545,7 +545,7 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if logo_path and not os.path.exists(logo_path):
         logo_path = None
         wm_type = "text"
-    text = s.get("text", "© Wei") if wm_type == "text" else ""
+    text = s.get("text", "© Wei")
 
     # ── Process ───────────────────────────────────────────────────────────────
     msg = await update.message.reply_text("⏳ 正在处理，请稍候…")

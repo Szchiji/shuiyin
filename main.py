@@ -526,7 +526,13 @@ async def save_settings(
     logo_path = None
     if logo and logo.filename:
         safe_logo = pathlib.Path(logo.filename).name
-        ext = safe_logo.rsplit(".", 1)[-1].lower() if "." in safe_logo else "png"
+        ext = safe_logo.rsplit(".", 1)[-1].lower() if "." in safe_logo else ""
+        if ext not in {"jpg", "jpeg", "png", "webp"}:
+            raise HTTPException(status_code=400, detail="Logo 仅支持 jpg / png / webp 格式")
+        logo_header = await logo.read(12)
+        await logo.seek(0)
+        if not _valid_magic_bytes(logo_header, ext):
+            raise HTTPException(status_code=400, detail="Logo 文件内容与扩展名不符，请上传真实的图片文件")
         logo_path = f"user_logos/{uid}.{ext}"
         os.makedirs("user_logos", exist_ok=True)
         with open(logo_path, "wb") as f:
@@ -564,6 +570,7 @@ async def add_watermark(
     logo: UploadFile = File(None),
     pos_x: float | None = Form(None),  # watermark centre X as % of image width (0–100)
     pos_y: float | None = Form(None),  # watermark centre Y as % of image height (0–100)
+    use_saved_logo: str = Form("false"),  # use the user's saved logo template
 ):
     tiled_bool = tiled.lower() in ("true", "on", "1")  # Fix #2: parse manually
     font_size = max(1, min(15, font_size))
@@ -598,36 +605,55 @@ async def add_watermark(
         shutil.copyfileobj(file.file, buffer)
 
     logo_path = None
+    logo_is_temp = False  # track whether logo_path points to a temp upload (should be deleted)
     if logo and logo.filename:
         safe_logo_filename = pathlib.Path(logo.filename).name
+        ext_logo = safe_logo_filename.rsplit(".", 1)[-1].lower() if "." in safe_logo_filename else ""
+        if ext_logo not in {"jpg", "jpeg", "png", "webp"}:
+            raise HTTPException(status_code=400, detail="Logo 仅支持 jpg / png / webp 格式")
+        logo_header = await logo.read(12)
+        await logo.seek(0)
+        if not _valid_magic_bytes(logo_header, ext_logo):
+            raise HTTPException(status_code=400, detail="Logo 文件内容与扩展名不符")
         logo_path = f"logos/{timestamp}_{safe_logo_filename}"
         with open(logo_path, "wb") as buffer:
             shutil.copyfileobj(logo.file, buffer)
+        logo_is_temp = True
+
+    # If no logo was uploaded but the user wants to use their saved template logo, look it up.
+    if not logo_path and use_saved_logo.lower() in ("true", "on", "1") and u:
+        saved_s = _db.get_watermark_settings(u["user_id"])
+        saved_logo = saved_s.get("logo_path")
+        if saved_logo and os.path.exists(saved_logo):
+            logo_path = saved_logo
+            logo_is_temp = False  # this is the user's permanent logo; don't delete it
+            # Use saved logo_scale if not explicitly overridden (form default is 20)
+            logo_scale = max(5, min(100, saved_s.get("logo_scale", logo_scale)))
 
     output_path = f"outputs/watermarked_{timestamp}.{ext}"
     # Images are always re-saved as JPEG (RGB); use .jpg extension for consistency
     if ext in ["jpg", "jpeg", "png", "webp"]:
         output_path = f"outputs/watermarked_{timestamp}.jpg"
 
+    loop = asyncio.get_running_loop()
     success = False
     if ext in ["jpg", "jpeg", "png", "webp"]:
-        success = add_watermark_to_image(
-            input_path, output_path, text, position, opacity, tiled_bool, logo_path,
-            pos_x=pos_x, pos_y=pos_y, font_size=font_size, logo_scale=logo_scale,
+        success = await loop.run_in_executor(
+            None,
+            partial(add_watermark_to_image,
+                    input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size, logo_scale),
         )
     elif ext in ["mp4", "mov"]:
-        # Fix #7: run blocking video work in a thread-pool executor
-        loop = asyncio.get_running_loop()
         success = await loop.run_in_executor(
             None,
             partial(add_watermark_to_video,
                     input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size, logo_scale),
         )
 
-    # Clean up uploaded originals immediately
+    # Clean up uploaded originals immediately; never delete the user's saved logo template
     if os.path.exists(input_path):
         os.remove(input_path)
-    if logo_path and os.path.exists(logo_path):
+    if logo_is_temp and logo_path and os.path.exists(logo_path):
         os.remove(logo_path)
 
     if success:
@@ -868,80 +894,87 @@ def _make_tiled_watermark_image(text, video_w, video_h, opacity, font_path, font
     return layer
 
 
+def _make_tiled_logo_image(logo_path, video_w, video_h, opacity, logo_scale):
+    """Build a full-frame RGBA PIL image with tiled logo pattern, same logic as image path."""
+    logo = Image.open(logo_path).convert("RGBA")
+    logo_size = int(min(video_w, video_h) * max(5, min(100, logo_scale)) / 100)
+    lw, lh = logo.size
+    if lw <= 0 or lh <= 0:
+        lw, lh = max(1, lw), max(1, lh)
+    if lw >= lh:
+        new_w = logo_size
+        new_h = max(1, int(lh * logo_size / lw))
+    else:
+        new_h = logo_size
+        new_w = max(1, int(lw * logo_size / lh))
+    logo = logo.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    logo = ImageEnhance.Brightness(logo).enhance(opacity / 100)
+
+    layer = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
+    step = int(logo_size * 1.7)
+    for x in range(0, video_w + step, step):
+        for y in range(0, video_h + step, step):
+            layer.paste(logo, (x, y), logo)
+    return layer
+
+
+def _write_overlay_video(clip, overlay_img, output_path):
+    """Save *overlay_img* (RGBA PIL image) as a temp file, composite over *clip*, write output."""
+    tmp_fd, tmp_overlay = tempfile.mkstemp(suffix=".png")
+    os.close(tmp_fd)
+    try:
+        overlay_img.save(tmp_overlay)
+        overlay_clip = ImageClip(tmp_overlay).set_duration(clip.duration)
+        final = CompositeVideoClip([clip, overlay_clip])
+        final.write_videofile(
+            output_path,
+            codec="libx264",
+            audio_codec="aac",
+            threads=os.cpu_count() or 4,
+            preset="medium",
+            verbose=False,
+            logger=None,
+        )
+    finally:
+        if os.path.exists(tmp_overlay):
+            os.remove(tmp_overlay)
+
+
 def add_watermark_to_video(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20):
     try:
         clip = VideoFileClip(input_path)
 
         if logo_path:
-            logo_h = int(min(clip.w, clip.h) * max(5, min(100, logo_scale)) / 100)
-            logo_clip = ImageClip(logo_path).resize(height=logo_h)
-            logo_clip = logo_clip.set_duration(clip.duration).set_opacity(opacity / 100)
-            pos = get_position(position, clip.w, clip.h, logo_clip.w, logo_clip.h, pos_x=pos_x, pos_y=pos_y)
-            logo_clip = logo_clip.set_position(pos)
-            final = CompositeVideoClip([clip, logo_clip])
+            if tiled:
+                overlay_img = _make_tiled_logo_image(logo_path, clip.w, clip.h, opacity, logo_scale)
+                _write_overlay_video(clip, overlay_img, output_path)
+                return True
+            else:
+                logo_h = int(min(clip.w, clip.h) * max(5, min(100, logo_scale)) / 100)
+                logo_clip = ImageClip(logo_path).resize(height=logo_h)
+                logo_clip = logo_clip.set_duration(clip.duration).set_opacity(opacity / 100)
+                pos = get_position(position, clip.w, clip.h, logo_clip.w, logo_clip.h, pos_x=pos_x, pos_y=pos_y)
+                logo_clip = logo_clip.set_position(pos)
+                final = CompositeVideoClip([clip, logo_clip])
         else:
             if tiled:
-                # Fix #3: PIL-generated tiled overlay, consistent with image path
                 overlay_img = _make_tiled_watermark_image(
                     text, clip.w, clip.h, opacity, FONT_PATH, font_size=font_size
                 )
-                # Use a cross-platform temp file; clean it up after writing the video
-                tmp_fd, tmp_overlay = tempfile.mkstemp(suffix=".png")
-                os.close(tmp_fd)
-                try:
-                    overlay_img.save(tmp_overlay)
-                    overlay_clip = (
-                        ImageClip(tmp_overlay)
-                        .set_duration(clip.duration)
-                    )
-                    final = CompositeVideoClip([clip, overlay_clip])
-                    # Fix #5: use cpu_count() for encoding threads
-                    final.write_videofile(
-                        output_path,
-                        codec="libx264",
-                        audio_codec="aac",
-                        threads=os.cpu_count() or 4,
-                        preset="medium",
-                        verbose=False,
-                        logger=None,
-                    )
-                finally:
-                    if os.path.exists(tmp_overlay):
-                        os.remove(tmp_overlay)
+                _write_overlay_video(clip, overlay_img, output_path)
                 return True
             else:
                 overlay_img = _make_positioned_watermark_image(
                     text, clip.w, clip.h, opacity, FONT_PATH, position, pos_x=pos_x, pos_y=pos_y, font_size=font_size
                 )
-                tmp_fd, tmp_overlay = tempfile.mkstemp(suffix=".png")
-                os.close(tmp_fd)
-                try:
-                    overlay_img.save(tmp_overlay)
-                    overlay_clip = (
-                        ImageClip(tmp_overlay)
-                        .set_duration(clip.duration)
-                    )
-                    final = CompositeVideoClip([clip, overlay_clip])
-                    final.write_videofile(
-                        output_path,
-                        codec="libx264",
-                        audio_codec="aac",
-                        threads=os.cpu_count() or 4,
-                        preset="medium",
-                        verbose=False,
-                        logger=None,
-                    )
-                finally:
-                    if os.path.exists(tmp_overlay):
-                        os.remove(tmp_overlay)
+                _write_overlay_video(clip, overlay_img, output_path)
                 return True
 
-        # Fix #5: use cpu_count() for encoding threads
         final.write_videofile(
             output_path,
             codec="libx264",
             audio_codec="aac",
-            threads=os.cpu_count() or 4,  # Fix #5
+            threads=os.cpu_count() or 4,
             preset="medium",
             verbose=False,
             logger=None,
