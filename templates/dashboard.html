@@ -167,7 +167,8 @@
       overflow: hidden;
       cursor: crosshair;
     }
-    #preview-img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; user-select: none; }
+    #preview-img, #preview-video { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; user-select: none; }
+    #preview-video { background: #0f172a; }
     #wm-drag {
       position: absolute;
       background: rgba(0,0,0,.45);
@@ -361,10 +362,11 @@
           </div>
           <div id="preview-container">
             <img id="preview-img" src="" alt="预览" draggable="false" />
+            <video id="preview-video" style="display:none" muted playsinline preload="metadata"></video>
             <div id="wm-drag"><span id="wm-text-label">{{ settings.text or '水印' }}</span><img id="wm-logo" alt="" draggable="false" /></div>
             <div id="tiled-overlay">🔲 全图平铺模式</div>
           </div>
-          <p class="hint" style="margin-top:5px;">仅图片支持拖动定位</p>
+          <p class="hint" style="margin-top:5px;">图片和视频均支持拖动定位</p>
         </div>
 
         <div class="field" id="wm-text-field">
@@ -662,6 +664,7 @@ const fileInput = document.getElementById('file');
 const previewWrap = document.getElementById('preview-wrap');
 const previewContainer = document.getElementById('preview-container');
 const previewImg = document.getElementById('preview-img');
+const previewVideo = document.getElementById('preview-video');
 const wmDrag = document.getElementById('wm-drag');
 const tiledOverlay = document.getElementById('tiled-overlay');
 const posXInput = document.getElementById('pos_x');
@@ -680,13 +683,17 @@ const opacityInput  = document.getElementById('opacity');
 const fontSizeInput = document.getElementById('font_size');
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+const VIDEO_EXTS = new Set(['mp4', 'mov']);
+// Whether the current preview shows a video (true) or an image (false).
+let previewIsVideo = false;
 const MIN_POS = 2, MAX_POS = 98;
 const MIN_FONT_PX = 12;
 const SNAP = { '右下': [88, 88], '左上': [12, 12], '右上': [88, 12], '左下': [12, 88], '中上': [50, 12], '中下': [50, 88], '居中': [50, 50] };
 
 function getImageRect() {
   const cw = previewContainer.clientWidth, ch = previewContainer.clientHeight;
-  const nw = previewImg.naturalWidth || cw, nh = previewImg.naturalHeight || ch;
+  const nw = (previewIsVideo ? previewVideo.videoWidth  : previewImg.naturalWidth)  || cw;
+  const nh = (previewIsVideo ? previewVideo.videoHeight : previewImg.naturalHeight) || ch;
   const imgR = nw / nh, conR = cw / ch;
   let rw, rh, rx, ry;
   if (imgR > conR) { rw = cw; rh = cw / imgR; rx = 0; ry = (ch - rh) / 2; }
@@ -764,6 +771,10 @@ fileInput.addEventListener('change', () => {
     const reader = new FileReader();
     reader.onload = (ev) => {
       previewImg.onload = () => {
+        previewIsVideo = false;
+        previewImg.style.display = 'block';
+        previewVideo.style.display = 'none';
+        previewVideo.removeAttribute('src');
         previewWrap.style.display = 'block';
         positionField.style.display = 'none';
         posXInput.value = '';
@@ -776,7 +787,26 @@ fileInput.addEventListener('change', () => {
       previewImg.src = ev.target.result;
     };
     reader.readAsDataURL(f);
+  } else if (VIDEO_EXTS.has(ext)) {
+    const url = URL.createObjectURL(f);
+    previewVideo.onloadeddata = () => {
+      previewIsVideo = true;
+      previewImg.style.display = 'none';
+      previewImg.removeAttribute('src');
+      previewVideo.style.display = 'block';
+      previewWrap.style.display = 'block';
+      positionField.style.display = 'none';
+      posXInput.value = '';
+      posYInput.value = '';
+      updateWmLabel();
+      updateTiledUI();
+      updateWmStyle();
+      snapToPreset(positionSelect.value);
+    };
+    previewVideo.src = url;
+    previewVideo.currentTime = 0;
   } else {
+    previewIsVideo = false;
     previewWrap.style.display = 'none';
     positionField.style.display = '';
     posXInput.value = '';
