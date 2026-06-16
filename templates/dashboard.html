@@ -2,8 +2,33 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>控制台 — 水印小程序</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    // Sync the Mini App with Telegram: expand to full height and follow the
+    // user's Telegram theme (light/dark). Falls back to the browser's
+    // prefers-color-scheme when opened outside Telegram.
+    (function () {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      function applyTheme(dark) {
+        document.documentElement.classList.toggle('tg-dark', !!dark);
+      }
+      if (tg) {
+        try { tg.ready(); tg.expand(); } catch (e) {}
+        applyTheme(tg.colorScheme === 'dark');
+        try {
+          tg.onEvent('themeChanged', function () { applyTheme(tg.colorScheme === 'dark'); });
+        } catch (e) {}
+      } else if (window.matchMedia) {
+        var mq = window.matchMedia('(prefers-color-scheme: dark)');
+        applyTheme(mq.matches);
+        if (mq.addEventListener) {
+          mq.addEventListener('change', function (e) { applyTheme(e.matches); });
+        }
+      }
+    })();
+  </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -222,6 +247,27 @@
       color: #92400e;
       font-weight: 500;
     }
+
+    /* ── Dark theme (follows Telegram colorScheme / prefers-color-scheme) ── */
+    html.tg-dark body { background: #17212b; color: #e7eef5; }
+    html.tg-dark .nav { background: #232e3c; box-shadow: 0 1px 0 #2b3a47, 0 2px 12px rgba(0,0,0,.4); }
+    html.tg-dark .nav-brand { color: #f1f5f9; }
+    html.tg-dark .section { background: #232e3c; border-color: #2b3a47; box-shadow: 0 1px 4px rgba(0,0,0,.3), 0 4px 20px rgba(0,0,0,.3); }
+    html.tg-dark .section-title { color: #f1f5f9; border-bottom-color: #2b3a47; }
+    html.tg-dark label { color: #aebcc8; }
+    html.tg-dark input[type="text"],
+    html.tg-dark select,
+    html.tg-dark input[type="file"] { background: #1b2733; border-color: #2b3a47; color: #e7eef5; }
+    html.tg-dark input[type="text"]:focus,
+    html.tg-dark select:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.2); }
+    html.tg-dark .hint { color: #7e8c99; }
+    html.tg-dark .tabs { background: #1b2733; }
+    html.tg-dark .tab-btn { color: #8a9aa8; }
+    html.tg-dark .tab-btn.active { background: #2b3a47; color: #f1f5f9; box-shadow: 0 1px 6px rgba(0,0,0,.4); }
+    html.tg-dark .usage-bar-wrap { background: #1b2733; }
+    html.tg-dark .alert-success { background: rgba(16,185,129,.12); border-color: rgba(16,185,129,.35); color: #6ee7b7; }
+    html.tg-dark .alert-error { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.35); color: #fca5a5; }
+    html.tg-dark .alert-info { background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.35); color: #93c5fd; }
   </style>
 </head>
 <body>
@@ -360,7 +406,7 @@
         <div class="field" id="logo-scale-field" style="display:none;">
           <label>图片水印大小</label>
           <div class="opacity-row">
-            <input type="range" id="logo_scale" name="logo_scale" min="5" max="100" value="{{ settings.logo_scale or 20 }}"
+            <input type="range" id="logo_scale" name="logo_scale" min="5" max="50" value="{{ settings.logo_scale or 20 }}"
                    oninput="document.getElementById('logo-scale-val').textContent=this.value+'%'" />
             <span class="opacity-val" id="logo-scale-val">{{ settings.logo_scale or 20 }}%</span>
           </div>
@@ -413,7 +459,7 @@
         <div class="field" id="tmpl-logo-scale-field" style="display:none;">
           <label>默认图片水印大小</label>
           <div class="opacity-row">
-            <input type="range" name="logo_scale" min="5" max="100" value="{{ settings.logo_scale or 20 }}"
+            <input type="range" name="logo_scale" min="5" max="50" value="{{ settings.logo_scale or 20 }}"
                    oninput="this.nextElementSibling.textContent=this.value+'%'" />
             <span class="opacity-val">{{ settings.logo_scale or 20 }}%</span>
           </div>
@@ -482,6 +528,32 @@ function toggleLogoField() {
 }
 toggleLogoField();
 
+// ── Reliable multipart upload helper ────────────────────────────────────────────
+// iOS WebKit / Telegram Mini App webviews intermittently reject `fetch()` POSTs
+// that carry a file in FormData with "TypeError: Load failed". XMLHttpRequest is
+// far more robust for multipart uploads in these webviews, so route uploads
+// through it while exposing a fetch-like response object to the callers.
+function xhrPostForm(url, formData) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.setRequestHeader('X-Requested-With', 'fetch');
+    xhr.onload = () => {
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        json: () => {
+          try { return Promise.resolve(JSON.parse(xhr.responseText || '{}')); }
+          catch (e) { return Promise.reject(e); }
+        },
+      });
+    };
+    xhr.onerror = () => reject(new TypeError('网络连接失败，请重试'));
+    xhr.ontimeout = () => reject(new TypeError('请求超时，请重试'));
+    xhr.send(formData);
+  });
+}
+
 // ── Watermark form submit ──────────────────────────────────────────────────────
 const form = document.getElementById('wm-form');
 const submitBtn = document.getElementById('submit-btn');
@@ -512,7 +584,7 @@ form.addEventListener('submit', async (e) => {
   }
 
   try {
-    const resp = await fetch('/add_watermark', { method: 'POST', body: fd });
+    const resp = await xhrPostForm('/add_watermark', fd);
     const data = await resp.json();
     progressWrap.style.display = 'none';
     if (data.success) {
@@ -549,11 +621,7 @@ templateForm.addEventListener('submit', async (e) => {
     // Signal AJAX via a form field too, since some proxies/webviews strip
     // custom request headers like X-Requested-With.
     fd.append('ajax', '1');
-    const resp = await fetch('/save_settings', {
-      method: 'POST',
-      body: fd,
-      headers: { 'X-Requested-With': 'fetch' },
-    });
+    const resp = await xhrPostForm('/save_settings', fd);
     if (resp.ok) {
       templateSuccess.style.display = 'block';
       templateSuccess.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
