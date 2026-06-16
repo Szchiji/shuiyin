@@ -636,7 +636,20 @@ def build_application() -> Application:
 
     db.init_db()
 
-    app = Application.builder().token(token).build()
+    # Telegram's default network timeouts (5s) are too short for uploading
+    # watermarked photos/videos, which caused httpx.ReadTimeout ("处理媒体失败:
+    # Timed out") when sending results back to the user. Use generous timeouts;
+    # media_write_timeout covers large file uploads specifically.
+    app = (
+        Application.builder()
+        .token(token)
+        .connect_timeout(30.0)
+        .read_timeout(60.0)
+        .write_timeout(60.0)
+        .pool_timeout(30.0)
+        .media_write_timeout(120.0)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
