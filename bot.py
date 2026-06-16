@@ -36,7 +36,7 @@ from telegram.ext import (
 logger = logging.getLogger(__name__)
 
 POSITIONS = ["左上", "右上", "左下", "右下", "居中", "中上", "中下"]
-LOGO_DIR = "user_logos"
+LOGO_DIR = db.LOGO_DIR
 
 # ── Admin IDs (loaded once at import time) ────────────────────────────────────
 

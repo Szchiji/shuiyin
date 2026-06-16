@@ -84,6 +84,9 @@ python main.py
 | `WEB_URL` | 可选 | 网站公开 URL，用于 `/webtoken` 回复中的链接，如 `https://your-domain.com` |
 | `WEBHOOK_URL` | 可选 | 机器人 Webhook 公开 HTTPS URL，如 `https://your-domain.com`。设置后机器人改用 webhook 模式接收消息，避免多实例部署时的轮询冲突；不设置则使用 polling（仅适合本地开发） |
 | `HTTPS_ONLY` | 可选 | 设为 `true` 时，Session Cookie 仅通过 HTTPS 发送（生产环境强烈建议开启） |
+| `DB_PATH` | 可选 | SQLite 数据库文件路径，默认 `watermark_bot.db`（位于工作目录）。**Railway 等容器平台的文件系统是临时的，重新部署/重启会清空**，必须把它指向持久化卷才能保存用户数据与水印模板，例如挂载卷到 `/data` 后设置 `DB_PATH=/data/watermark_bot.db`。程序会自动创建该路径所在目录，并将 Logo 模板图片存放在同一目录下的 `user_logos/`，因此数据库与图片水印模板会一起持久化。 |
+
+> 💡 **数据持久化提示（Railway）**：若未挂载持久化卷并设置 `DB_PATH`，水印模板看似“保存成功”，但容器重启后数据库会被重置，模板随之丢失。请在 Railway 中添加一个 Volume（如挂载到 `/data`），并将 `DB_PATH` 指向该卷内的文件。
 
 设置 `BOT_TOKEN` 后，机器人将在 Web 服务启动时自动一起启动。
 
