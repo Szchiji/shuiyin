@@ -27,13 +27,21 @@ pip install -r requirements.txt
 
 ## 字体说明
 
-中文水印依赖 `simhei.ttf`（黑体），请将字体文件放入项目根目录下的 `fonts/` 目录：
+中文水印需要一款支持 CJK（中日韩）字符的 TrueType 字体。
+
+- **Railway / Nixpacks 部署**：`nixpacks.toml` 会安装 `wqy_zenhei`（文泉驿正黑），并在构建阶段把 `wqy-zenhei.ttc` 复制到项目根目录的 `fonts/` 下，运行时自动加载，无需手动配置。
+- **本地或其他环境**：可将任意 CJK 字体放入 `fonts/` 目录，程序会按以下文件名顺序优先查找：
 
 ```
+fonts/wqy-zenhei.ttc
+fonts/wqy-microhei.ttc
+fonts/NotoSansCJK-Regular.ttc
+fonts/NotoSansSC-Regular.otf
+fonts/NotoSerifCJK-Regular.ttc
 fonts/simhei.ttf
 ```
 
-若未找到字体文件，程序会自动回退到 Pillow 默认字体并打印日志提示。
+若 `fonts/` 中未找到字体，程序还会在系统字体路径（如 `/usr/share/fonts`、Nix store）中搜索 CJK 字体；全部失败时回退到 Pillow 默认字体（无法显示中文）并打印日志提示。
 
 ---
 
