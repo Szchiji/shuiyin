@@ -2,8 +2,33 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>水印小程序</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    // Sync the Mini App with Telegram: expand to full height and follow the
+    // user's Telegram theme (light/dark). Falls back to the browser's
+    // prefers-color-scheme when opened outside Telegram.
+    (function () {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      function applyTheme(dark) {
+        document.documentElement.classList.toggle('tg-dark', !!dark);
+      }
+      if (tg) {
+        try { tg.ready(); tg.expand(); } catch (e) {}
+        applyTheme(tg.colorScheme === 'dark');
+        try {
+          tg.onEvent('themeChanged', function () { applyTheme(tg.colorScheme === 'dark'); });
+        } catch (e) {}
+      } else if (window.matchMedia) {
+        var mq = window.matchMedia('(prefers-color-scheme: dark)');
+        applyTheme(mq.matches);
+        if (mq.addEventListener) {
+          mq.addEventListener('change', function (e) { applyTheme(e.matches); });
+        }
+      }
+    })();
+  </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -274,6 +299,27 @@
     }
 
     #tiled-overlay.active { display: flex; }
+
+    /* ── Dark theme (follows Telegram colorScheme / prefers-color-scheme) ── */
+    html.tg-dark body { background: linear-gradient(135deg, #17212b 0%, #1b2330 100%); color: #e7eef5; }
+    html.tg-dark .card { background: #232e3c; border-color: #2b3a47; box-shadow: 0 4px 32px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.3); }
+    html.tg-dark h1 { color: #f1f5f9; }
+    html.tg-dark .subtitle { color: #8a9aa8; }
+    html.tg-dark label { color: #aebcc8; }
+    html.tg-dark input[type="text"],
+    html.tg-dark input[type="file"],
+    html.tg-dark select { background: #1b2733; border-color: #2b3a47; color: #e7eef5; }
+    html.tg-dark input[type="text"]:focus,
+    html.tg-dark select:focus { background: #1b2733; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.2); }
+    html.tg-dark .hint { color: #7e8c99; }
+    html.tg-dark .divider { border-top-color: #2b3a47; }
+    html.tg-dark .preview-label { color: #8a9aa8; }
+    html.tg-dark #progress-wrap { background: #1b2733; border-color: #2b3a47; }
+    html.tg-dark #progress-text { color: #aebcc8; }
+    html.tg-dark .spinner { border-color: #2b3a47; border-top-color: #3b82f6; }
+    html.tg-dark #result-wrap { background: rgba(16,185,129,.12); border-color: rgba(16,185,129,.35); }
+    html.tg-dark #result-wrap p { color: #6ee7b7; }
+    html.tg-dark #error-wrap { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.35); color: #fca5a5; }
   </style>
 </head>
 <body>
