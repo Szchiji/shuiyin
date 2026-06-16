@@ -167,7 +167,8 @@
       overflow: hidden;
       cursor: crosshair;
     }
-    #preview-img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; user-select: none; }
+    #preview-img, #preview-video { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; user-select: none; }
+    #preview-video { background: #0f172a; }
     #wm-drag {
       position: absolute;
       background: rgba(0,0,0,.45);
@@ -188,6 +189,23 @@
       z-index: 10;
     }
     #wm-drag.hidden { display: none; }
+    /* Logo preview mode: show the actual logo image at its real scale / margins */
+    #wm-drag #wm-logo { display: none; }
+    #wm-drag.logo-mode {
+      background: transparent;
+      padding: 0;
+      max-width: none;
+      border-style: dashed;
+    }
+    #wm-drag.logo-mode #wm-text-label { display: none; }
+    #wm-drag.logo-mode #wm-logo {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+      user-select: none;
+    }
     #tiled-overlay {
       display: none;
       position: absolute;
@@ -344,10 +362,11 @@
           </div>
           <div id="preview-container">
             <img id="preview-img" src="" alt="预览" draggable="false" />
-            <div id="wm-drag">{{ settings.text or '水印' }}</div>
+            <video id="preview-video" style="display:none" muted playsinline preload="metadata"></video>
+            <div id="wm-drag"><span id="wm-text-label">{{ settings.text or '水印' }}</span><img id="wm-logo" alt="" draggable="false" /></div>
             <div id="tiled-overlay">🔲 全图平铺模式</div>
           </div>
-          <p class="hint" style="margin-top:5px;">仅图片支持拖动定位</p>
+          <p class="hint" style="margin-top:5px;">图片和视频均支持拖动定位</p>
         </div>
 
         <div class="field" id="wm-text-field">
@@ -406,11 +425,11 @@
         <div class="field" id="logo-scale-field" style="display:none;">
           <label>图片水印大小</label>
           <div class="opacity-row">
-            <input type="range" id="logo_scale" name="logo_scale" min="5" max="50" value="{{ settings.logo_scale or 20 }}"
+            <input type="range" id="logo_scale" name="logo_scale" min="5" max="100" value="{{ settings.logo_scale or 20 }}"
                    oninput="document.getElementById('logo-scale-val').textContent=this.value+'%'" />
             <span class="opacity-val" id="logo-scale-val">{{ settings.logo_scale or 20 }}%</span>
           </div>
-          <p class="hint">占图片短边的百分比（5%–50%）</p>
+          <p class="hint">占图片短边的百分比（5%–100%）</p>
         </div>
 
         <input type="hidden" id="pos_x" name="pos_x" value="" />
@@ -459,11 +478,11 @@
         <div class="field" id="tmpl-logo-scale-field" style="display:none;">
           <label>默认图片水印大小</label>
           <div class="opacity-row">
-            <input type="range" name="logo_scale" min="5" max="50" value="{{ settings.logo_scale or 20 }}"
+            <input type="range" name="logo_scale" min="5" max="100" value="{{ settings.logo_scale or 20 }}"
                    oninput="this.nextElementSibling.textContent=this.value+'%'" />
             <span class="opacity-val">{{ settings.logo_scale or 20 }}%</span>
           </div>
-          <p class="hint">占图片短边的百分比（5%–50%）</p>
+          <p class="hint">占图片短边的百分比（5%–100%）</p>
         </div>
 
         <div class="field">
@@ -645,6 +664,7 @@ const fileInput = document.getElementById('file');
 const previewWrap = document.getElementById('preview-wrap');
 const previewContainer = document.getElementById('preview-container');
 const previewImg = document.getElementById('preview-img');
+const previewVideo = document.getElementById('preview-video');
 const wmDrag = document.getElementById('wm-drag');
 const tiledOverlay = document.getElementById('tiled-overlay');
 const posXInput = document.getElementById('pos_x');
@@ -655,17 +675,25 @@ const tiledCheck = document.getElementById('tiled');
 const positionField = document.getElementById('position-field');
 const positionSelect = document.getElementById('position');
 const logoInput = document.getElementById('logo');
+const logoScaleInput = document.getElementById('logo_scale');
+const wmTextLabel = document.getElementById('wm-text-label');
+const wmLogo = document.getElementById('wm-logo');
+let logoNaturalW = 0, logoNaturalH = 0;
 const opacityInput  = document.getElementById('opacity');
 const fontSizeInput = document.getElementById('font_size');
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+const VIDEO_EXTS = new Set(['mp4', 'mov']);
+// Whether the current preview shows a video (true) or an image (false).
+let previewIsVideo = false;
 const MIN_POS = 2, MAX_POS = 98;
 const MIN_FONT_PX = 12;
 const SNAP = { '右下': [88, 88], '左上': [12, 12], '右上': [88, 12], '左下': [12, 88], '中上': [50, 12], '中下': [50, 88], '居中': [50, 50] };
 
 function getImageRect() {
   const cw = previewContainer.clientWidth, ch = previewContainer.clientHeight;
-  const nw = previewImg.naturalWidth || cw, nh = previewImg.naturalHeight || ch;
+  const nw = (previewIsVideo ? previewVideo.videoWidth  : previewImg.naturalWidth)  || cw;
+  const nh = (previewIsVideo ? previewVideo.videoHeight : previewImg.naturalHeight) || ch;
   const imgR = nw / nh, conR = cw / ch;
   let rw, rh, rx, ry;
   if (imgR > conR) { rw = cw; rh = cw / imgR; rx = 0; ry = (ch - rh) / 2; }
@@ -689,13 +717,37 @@ function snapToPreset(name) {
 function updateWmLabel() {
   const useSavedLogoInput = document.getElementById('use-saved-logo');
   const savedLogoMode = useSavedLogoInput && useSavedLogoInput.value === 'true';
-  const hasLogo = savedLogoMode || (logoInput.files && logoInput.files[0]);
-  wmDrag.textContent = hasLogo
-    ? '🖼 Logo'
-    : (textInput.value.trim() || '水印');
+  const uploaded = logoInput.files && logoInput.files[0];
+  const hasLogo = savedLogoMode || uploaded;
   document.getElementById('logo-scale-field').style.display = hasLogo ? '' : 'none';
   document.getElementById('font-size-field').style.display = hasLogo ? 'none' : '';
   document.getElementById('wm-text-field').style.display = hasLogo ? 'none' : '';
+  // Only the uploaded logo's bytes are available client-side, so render the real
+  // image when uploaded; fall back to a label for a saved-template logo.
+  const hasImg = !!(uploaded && logoNaturalW && logoNaturalH);
+  wmDrag.classList.toggle('logo-mode', hasImg);
+  if (hasImg) {
+    updateLogoPreview();
+  } else {
+    wmTextLabel.textContent = hasLogo ? '🖼 Logo' : (textInput.value.trim() || '水印');
+    wmDrag.style.width = '';
+    wmDrag.style.height = '';
+  }
+}
+/**
+ * Size the uploaded logo preview to match the backend: the logo's longest side
+ * is logo_scale% of the rendered image's short side, aspect ratio preserved.
+ */
+function updateLogoPreview() {
+  if (!logoNaturalW || !logoNaturalH) return;
+  const r = getImageRect();
+  const longest = Math.min(r.w, r.h) * Number(logoScaleInput.value) / 100;
+  let lw, lh;
+  if (logoNaturalW >= logoNaturalH) { lw = longest; lh = longest * logoNaturalH / logoNaturalW; }
+  else                              { lh = longest; lw = longest * logoNaturalW / logoNaturalH; }
+  wmDrag.style.width   = lw + 'px';
+  wmDrag.style.height  = lh + 'px';
+  wmDrag.style.opacity = Number(opacityInput.value) / 100;
 }
 function updateTiledUI() {
   const on = tiledCheck.checked;
@@ -719,6 +771,10 @@ fileInput.addEventListener('change', () => {
     const reader = new FileReader();
     reader.onload = (ev) => {
       previewImg.onload = () => {
+        previewIsVideo = false;
+        previewImg.style.display = 'block';
+        previewVideo.style.display = 'none';
+        previewVideo.removeAttribute('src');
         previewWrap.style.display = 'block';
         positionField.style.display = 'none';
         posXInput.value = '';
@@ -731,7 +787,26 @@ fileInput.addEventListener('change', () => {
       previewImg.src = ev.target.result;
     };
     reader.readAsDataURL(f);
+  } else if (VIDEO_EXTS.has(ext)) {
+    const url = URL.createObjectURL(f);
+    previewVideo.onloadeddata = () => {
+      previewIsVideo = true;
+      previewImg.style.display = 'none';
+      previewImg.removeAttribute('src');
+      previewVideo.style.display = 'block';
+      previewWrap.style.display = 'block';
+      positionField.style.display = 'none';
+      posXInput.value = '';
+      posYInput.value = '';
+      updateWmLabel();
+      updateTiledUI();
+      updateWmStyle();
+      snapToPreset(positionSelect.value);
+    };
+    previewVideo.src = url;
+    previewVideo.currentTime = 0;
   } else {
+    previewIsVideo = false;
     previewWrap.style.display = 'none';
     positionField.style.display = '';
     posXInput.value = '';
@@ -746,11 +821,27 @@ logoInput.addEventListener('change', () => {
     // User is uploading a new logo — stop using the saved template
     useSavedLogoInput.value = 'false';
   }
-  updateWmLabel();
+  const f = logoInput.files && logoInput.files[0];
+  if (f) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      wmLogo.onload = () => {
+        logoNaturalW = wmLogo.naturalWidth;
+        logoNaturalH = wmLogo.naturalHeight;
+        updateWmLabel();
+      };
+      wmLogo.src = ev.target.result;
+    };
+    reader.readAsDataURL(f);
+  } else {
+    logoNaturalW = logoNaturalH = 0;
+    updateWmLabel();
+  }
 });
 tiledCheck.addEventListener('change', updateTiledUI);
-opacityInput.addEventListener('input',  () => { if (previewWrap.style.display !== 'none') updateWmStyle(); });
+opacityInput.addEventListener('input',  () => { if (previewWrap.style.display !== 'none') { updateWmStyle(); updateLogoPreview(); } });
 fontSizeInput.addEventListener('input', () => { if (previewWrap.style.display !== 'none') updateWmStyle(); });
+logoScaleInput.addEventListener('input', () => { if (previewWrap.style.display !== 'none') updateLogoPreview(); });
 positionSelect.addEventListener('change', () => { if (previewWrap.style.display !== 'none') snapToPreset(positionSelect.value); });
 
 previewContainer.addEventListener('click', (e) => {

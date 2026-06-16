@@ -252,7 +252,8 @@
       cursor: crosshair;
     }
 
-    #preview-img {
+    #preview-img,
+    #preview-video {
       width: 100%;
       height: 100%;
       object-fit: contain;
@@ -260,6 +261,7 @@
       pointer-events: none;
       user-select: none;
     }
+    #preview-video { background: #0f172a; }
 
     #wm-drag {
       position: absolute;
@@ -284,6 +286,24 @@
 
     #wm-drag:active { cursor: grabbing; box-shadow: 0 0 0 2px #3b82f6; }
     #wm-drag.hidden { display: none; }
+
+    /* Logo preview mode: show the actual logo image at its real scale / margins */
+    #wm-drag #wm-logo { display: none; }
+    #wm-drag.logo-mode {
+      background: transparent;
+      padding: 0;
+      max-width: none;
+      border-style: dashed;
+    }
+    #wm-drag.logo-mode #wm-text-label { display: none; }
+    #wm-drag.logo-mode #wm-logo {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+      user-select: none;
+    }
 
     #tiled-overlay {
       display: none;
@@ -344,10 +364,11 @@
       </div>
       <div id="preview-container">
         <img id="preview-img" src="" alt="预览" draggable="false" />
-        <div id="wm-drag">© Wei</div>
+        <video id="preview-video" style="display:none" muted playsinline preload="metadata"></video>
+        <div id="wm-drag"><span id="wm-text-label">© Wei</span><img id="wm-logo" alt="" draggable="false" /></div>
         <div id="tiled-overlay">🔲 全图平铺模式，位置不生效</div>
       </div>
-      <p class="hint" style="margin-top:5px;">仅图片支持拖动定位；位置会精确映射到原图</p>
+      <p class="hint" style="margin-top:5px;">图片和视频均支持拖动定位；位置会精确映射到原文件</p>
     </div>
 
     <hr class="divider" />
@@ -400,11 +421,11 @@
     <div class="field" id="logo-scale-field" style="display:none;">
       <label for="logo_scale">图片水印大小</label>
       <div class="opacity-row">
-        <input type="range" id="logo_scale" name="logo_scale" min="5" max="50" value="20"
+        <input type="range" id="logo_scale" name="logo_scale" min="5" max="100" value="20"
                oninput="document.getElementById('logo-scale-val').textContent = this.value + '%'" />
         <span class="opacity-val" id="logo-scale-val">20%</span>
       </div>
-      <p class="hint">占图片短边的百分比（5%–50%）</p>
+      <p class="hint">占图片短边的百分比（5%–100%）</p>
     </div>
 
     <!-- Hidden: custom drag position (set by JS, image only) -->
@@ -519,6 +540,7 @@
 const previewWrap      = document.getElementById('preview-wrap');
 const previewContainer = document.getElementById('preview-container');
 const previewImg       = document.getElementById('preview-img');
+const previewVideo     = document.getElementById('preview-video');
 const wmDrag           = document.getElementById('wm-drag');
 const tiledOverlay     = document.getElementById('tiled-overlay');
 const posXInput        = document.getElementById('pos_x');
@@ -529,8 +551,17 @@ const tiledCheck       = document.getElementById('tiled');
 const positionField    = document.getElementById('position-field');
 const positionSelect   = document.getElementById('position');
 const logoInput        = document.getElementById('logo');
+const logoScaleInput   = document.getElementById('logo_scale');
+const opacityInput     = document.getElementById('opacity');
+const wmTextLabel      = document.getElementById('wm-text-label');
+const wmLogo           = document.getElementById('wm-logo');
+
+let logoNaturalW = 0, logoNaturalH = 0;
+// Whether the current preview shows a video (true) or an image (false).
+let previewIsVideo = false;
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+const VIDEO_EXTS = new Set(['mp4', 'mov']);
 
 // Edge constraints: watermark position range from 2% to 98% of image dimensions
 const MIN_POS = 2, MAX_POS = 98;
@@ -547,8 +578,8 @@ const SNAP = {
 function getImageRect() {
   const cw = previewContainer.clientWidth;
   const ch = previewContainer.clientHeight;
-  const nw = previewImg.naturalWidth  || cw;
-  const nh = previewImg.naturalHeight || ch;
+  const nw = (previewIsVideo ? previewVideo.videoWidth  : previewImg.naturalWidth)  || cw;
+  const nh = (previewIsVideo ? previewVideo.videoHeight : previewImg.naturalHeight) || ch;
   const imgR = nw / nh;
   const conR = cw / ch;
   let rw, rh, rx, ry;
@@ -577,8 +608,34 @@ function snapToPreset(name) {
 
 function updateWmLabel() {
   const hasLogo = logoInput.files && logoInput.files[0];
-  wmDrag.textContent = hasLogo ? '🖼 Logo' : (textInput.value.trim() || '水印');
   document.getElementById('logo-scale-field').style.display = hasLogo ? '' : 'none';
+  wmDrag.classList.toggle('logo-mode', !!hasLogo);
+  if (hasLogo) {
+    updateLogoPreview();
+  } else {
+    wmTextLabel.textContent = textInput.value.trim() || '水印';
+    wmDrag.style.width = '';
+    wmDrag.style.height = '';
+    wmDrag.style.opacity = '';
+  }
+}
+
+/**
+ * Size the logo preview to match the backend: the logo's longest side is
+ * logo_scale% of the rendered image's short side, with aspect ratio preserved.
+ * Also reflects the chosen opacity so the preview matches the final result.
+ */
+function updateLogoPreview() {
+  const hasLogo = logoInput.files && logoInput.files[0];
+  if (!hasLogo || !logoNaturalW || !logoNaturalH) return;
+  const r = getImageRect();
+  const longest = Math.min(r.w, r.h) * Number(logoScaleInput.value) / 100;
+  let lw, lh;
+  if (logoNaturalW >= logoNaturalH) { lw = longest; lh = longest * logoNaturalH / logoNaturalW; }
+  else                              { lh = longest; lw = longest * logoNaturalW / logoNaturalH; }
+  wmDrag.style.width   = lw + 'px';
+  wmDrag.style.height  = lh + 'px';
+  wmDrag.style.opacity = Number(opacityInput.value) / 100;
 }
 
 function updateTiledUI() {
@@ -596,6 +653,10 @@ fileInput.addEventListener('change', () => {
     const reader = new FileReader();
     reader.onload = (ev) => {
       previewImg.onload = () => {
+        previewIsVideo = false;
+        previewImg.style.display   = 'block';
+        previewVideo.style.display = 'none';
+        previewVideo.removeAttribute('src');
         previewWrap.style.display  = 'block';
         positionField.style.display = 'none';
         posXInput.value = '';
@@ -607,7 +668,26 @@ fileInput.addEventListener('change', () => {
       previewImg.src = ev.target.result;
     };
     reader.readAsDataURL(f);
+  } else if (VIDEO_EXTS.has(ext)) {
+    const url = URL.createObjectURL(f);
+    previewVideo.onloadeddata = () => {
+      previewIsVideo = true;
+      previewImg.style.display   = 'none';
+      previewImg.removeAttribute('src');
+      previewVideo.style.display = 'block';
+      previewWrap.style.display  = 'block';
+      positionField.style.display = 'none';
+      posXInput.value = '';
+      posYInput.value = '';
+      updateWmLabel();
+      updateTiledUI();
+      snapToPreset(positionSelect.value);
+    };
+    previewVideo.src = url;
+    // Seek a touch into the clip so a representative frame is shown.
+    previewVideo.currentTime = 0;
   } else {
+    previewIsVideo = false;
     previewWrap.style.display   = 'none';
     positionField.style.display = '';
     posXInput.value = '';
@@ -617,7 +697,30 @@ fileInput.addEventListener('change', () => {
 
 // ── Sync controls → preview ─────────────────────────────────────────────────
 textInput.addEventListener('input',  updateWmLabel);
-logoInput.addEventListener('change', updateWmLabel);
+logoInput.addEventListener('change', () => {
+  const f = logoInput.files && logoInput.files[0];
+  if (f) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      wmLogo.onload = () => {
+        logoNaturalW = wmLogo.naturalWidth;
+        logoNaturalH = wmLogo.naturalHeight;
+        updateWmLabel();
+      };
+      wmLogo.src = ev.target.result;
+    };
+    reader.readAsDataURL(f);
+  } else {
+    logoNaturalW = logoNaturalH = 0;
+    updateWmLabel();
+  }
+});
+logoScaleInput.addEventListener('input', () => {
+  if (previewWrap.style.display !== 'none') updateLogoPreview();
+});
+opacityInput.addEventListener('input', () => {
+  if (previewWrap.style.display !== 'none') updateLogoPreview();
+});
 tiledCheck.addEventListener('change', updateTiledUI);
 
 positionSelect.addEventListener('change', () => {
