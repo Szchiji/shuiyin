@@ -572,6 +572,7 @@ async def save_settings(
     font_size: int = Form(5),
     logo_scale: int = Form(20),
     logo: UploadFile = File(None),
+    ajax: str = Form(""),
 ):
     u = _session_user(request)
     uid = u["user_id"]
@@ -604,6 +605,17 @@ async def save_settings(
     if logo_path:
         watermark_settings["logo_path"] = logo_path
     _db.save_watermark_settings(uid, **watermark_settings)
+    # Telegram Mini App webviews don't reliably handle full-page form-POST
+    # navigations, so the form submits via fetch(). Return JSON for those
+    # requests and keep the redirect for plain (non-JS) form submissions.
+    # The `ajax` form field is checked in addition to the header because some
+    # proxies/webviews strip custom request headers.
+    is_ajax = (
+        ajax.lower() in ("1", "true", "fetch")
+        or request.headers.get("x-requested-with", "").lower() == "fetch"
+    )
+    if is_ajax:
+        return JSONResponse({"success": True})
     return RedirectResponse("/dashboard?saved=1", status_code=302)
 
 
