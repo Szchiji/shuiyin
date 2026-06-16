@@ -23,6 +23,7 @@ import urllib.parse
 
 import db
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import TelegramError, TimedOut
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -477,6 +478,9 @@ async def _save_logo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "使用 /settings 可调整位置、透明度等。",
             reply_markup=_settings_kb(s),
         )
+    except TimedOut:
+        logger.warning("保存 logo 超时")
+        await msg.edit_text("⏳ 保存超时，可能是文件较大或网络不稳定，请稍后重试。")
     except Exception as e:
         logger.error("保存 logo 失败: %s", e, exc_info=True)
         await msg.edit_text(f"❌ 保存失败：{e}")
@@ -498,28 +502,38 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ext = "jpg"
     tg_file = None
 
-    if update.message.photo:
-        tg_file = await update.message.photo[-1].get_file()
-    elif update.message.video:
-        fname = update.message.video.file_name or "video.mp4"
-        ext = pathlib.Path(fname).suffix.lstrip(".").lower() or "mp4"
-        if ext not in {"mp4", "mov"}:
-            await update.message.reply_text("❌ 仅支持 mp4/mov 视频格式。")
-            return
-        tg_file = await update.message.video.get_file()
-        is_video = True
-    elif update.message.document:
-        doc = update.message.document
-        fname = doc.file_name or "file"
-        ext = pathlib.Path(fname).suffix.lstrip(".").lower()
-        if ext in {"mp4", "mov"}:
+    try:
+        if update.message.photo:
+            tg_file = await update.message.photo[-1].get_file()
+        elif update.message.video:
+            fname = update.message.video.file_name or "video.mp4"
+            ext = pathlib.Path(fname).suffix.lstrip(".").lower() or "mp4"
+            if ext not in {"mp4", "mov"}:
+                await update.message.reply_text("❌ 仅支持 mp4/mov 视频格式。")
+                return
+            tg_file = await update.message.video.get_file()
             is_video = True
-        elif ext not in {"jpg", "jpeg", "png", "webp"}:
-            await update.message.reply_text("❌ 仅支持图片（jpg/png/webp）或视频（mp4/mov）。")
+        elif update.message.document:
+            doc = update.message.document
+            fname = doc.file_name or "file"
+            ext = pathlib.Path(fname).suffix.lstrip(".").lower()
+            if ext in {"mp4", "mov"}:
+                is_video = True
+            elif ext not in {"jpg", "jpeg", "png", "webp"}:
+                await update.message.reply_text("❌ 仅支持图片（jpg/png/webp）或视频（mp4/mov）。")
+                return
+            tg_file = await doc.get_file()
+        else:
+            await update.message.reply_text("❌ 请发送图片或视频文件。")
             return
-        tg_file = await doc.get_file()
-    else:
-        await update.message.reply_text("❌ 请发送图片或视频文件。")
+    except TimedOut:
+        await update.message.reply_text(
+            "⏳ 获取文件超时，可能是文件较大或网络不稳定，请稍后重试。"
+        )
+        return
+    except TelegramError as e:
+        logger.error("获取文件失败: %s", e, exc_info=True)
+        await update.message.reply_text("❌ 获取文件失败，请稍后重试。")
         return
 
     # ── Check / charge daily quota for regular users ──────────────────────────
@@ -589,6 +603,9 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 with open(output_path, "rb") as f:
                     await update.message.reply_photo(f, caption=caption_out)
 
+    except TimedOut:
+        logger.warning("处理媒体超时")
+        await msg.edit_text("⏳ 处理超时，可能是文件较大或网络不稳定，请稍后重试。")
     except Exception as e:
         logger.error("处理媒体失败: %s", e, exc_info=True)
         await msg.edit_text(f"❌ 处理失败：{e}")
@@ -615,6 +632,24 @@ async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await _save_logo(update, context)
     else:
         await _apply_watermark(update, context)
+
+
+# ── Global error handler ──────────────────────────────────────────────────────
+
+async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log unhandled errors and notify the user when possible."""
+    err = context.error
+    if isinstance(err, TimedOut):
+        logger.warning("网络超时: %s", err)
+    else:
+        logger.error("未处理的异常: %s", err, exc_info=err)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "⚠️ 处理时发生错误，请稍后重试。"
+            )
+        except TelegramError as notify_err:
+            logger.debug("通知用户失败: %s", notify_err)
 
 
 # ── Application factory ───────────────────────────────────────────────────────
@@ -661,5 +696,6 @@ def build_application() -> Application:
             handle_media_message,
         )
     )
+    app.add_error_handler(handle_error)
     return app
 
