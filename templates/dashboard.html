@@ -360,7 +360,7 @@
         <div class="field" id="logo-scale-field" style="display:none;">
           <label>图片水印大小</label>
           <div class="opacity-row">
-            <input type="range" id="logo_scale" name="logo_scale" min="5" max="100" value="{{ settings.logo_scale or 20 }}"
+            <input type="range" id="logo_scale" name="logo_scale" min="5" max="50" value="{{ settings.logo_scale or 20 }}"
                    oninput="document.getElementById('logo-scale-val').textContent=this.value+'%'" />
             <span class="opacity-val" id="logo-scale-val">{{ settings.logo_scale or 20 }}%</span>
           </div>
@@ -413,7 +413,7 @@
         <div class="field" id="tmpl-logo-scale-field" style="display:none;">
           <label>默认图片水印大小</label>
           <div class="opacity-row">
-            <input type="range" name="logo_scale" min="5" max="100" value="{{ settings.logo_scale or 20 }}"
+            <input type="range" name="logo_scale" min="5" max="50" value="{{ settings.logo_scale or 20 }}"
                    oninput="this.nextElementSibling.textContent=this.value+'%'" />
             <span class="opacity-val">{{ settings.logo_scale or 20 }}%</span>
           </div>
@@ -482,6 +482,29 @@ function toggleLogoField() {
 }
 toggleLogoField();
 
+// ── Reliable multipart upload helper ────────────────────────────────────────────
+// iOS WebKit / Telegram Mini App webviews intermittently reject `fetch()` POSTs
+// that carry a file in FormData with "TypeError: Load failed". XMLHttpRequest is
+// far more robust for multipart uploads in these webviews, so route uploads
+// through it while exposing a fetch-like response object to the callers.
+function xhrPostForm(url, formData) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.setRequestHeader('X-Requested-With', 'fetch');
+    xhr.onload = () => {
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        json: () => Promise.resolve(JSON.parse(xhr.responseText || '{}')),
+      });
+    };
+    xhr.onerror = () => reject(new TypeError('网络连接失败，请重试'));
+    xhr.ontimeout = () => reject(new TypeError('请求超时，请重试'));
+    xhr.send(formData);
+  });
+}
+
 // ── Watermark form submit ──────────────────────────────────────────────────────
 const form = document.getElementById('wm-form');
 const submitBtn = document.getElementById('submit-btn');
@@ -512,7 +535,7 @@ form.addEventListener('submit', async (e) => {
   }
 
   try {
-    const resp = await fetch('/add_watermark', { method: 'POST', body: fd });
+    const resp = await xhrPostForm('/add_watermark', fd);
     const data = await resp.json();
     progressWrap.style.display = 'none';
     if (data.success) {
@@ -549,11 +572,7 @@ templateForm.addEventListener('submit', async (e) => {
     // Signal AJAX via a form field too, since some proxies/webviews strip
     // custom request headers like X-Requested-With.
     fd.append('ajax', '1');
-    const resp = await fetch('/save_settings', {
-      method: 'POST',
-      body: fd,
-      headers: { 'X-Requested-With': 'fetch' },
-    });
+    const resp = await xhrPostForm('/save_settings', fd);
     if (resp.ok) {
       templateSuccess.style.display = 'block';
       templateSuccess.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

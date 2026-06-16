@@ -354,7 +354,7 @@
     <div class="field" id="logo-scale-field" style="display:none;">
       <label for="logo_scale">图片水印大小</label>
       <div class="opacity-row">
-        <input type="range" id="logo_scale" name="logo_scale" min="5" max="100" value="20"
+        <input type="range" id="logo_scale" name="logo_scale" min="5" max="50" value="20"
                oninput="document.getElementById('logo-scale-val').textContent = this.value + '%'" />
         <span class="opacity-val" id="logo-scale-val">20%</span>
       </div>
@@ -394,6 +394,27 @@
   const errorWrap    = document.getElementById('error-wrap');
   const downloadLink = document.getElementById('download-link');
 
+  // iOS WebKit / Telegram Mini App webviews intermittently reject `fetch()`
+  // POSTs that carry a file in FormData with "TypeError: Load failed".
+  // XMLHttpRequest is far more robust for multipart uploads in these webviews.
+  function xhrPostForm(url, formData) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url, true);
+      xhr.setRequestHeader('X-Requested-With', 'fetch');
+      xhr.onload = () => {
+        resolve({
+          ok: xhr.status >= 200 && xhr.status < 300,
+          status: xhr.status,
+          json: () => Promise.resolve(JSON.parse(xhr.responseText || '{}')),
+        });
+      };
+      xhr.onerror = () => reject(new TypeError('网络连接失败，请重试'));
+      xhr.ontimeout = () => reject(new TypeError('请求超时，请重试'));
+      xhr.send(formData);
+    });
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -421,7 +442,7 @@
     }
 
     try {
-      const resp = await fetch('/add_watermark', { method: 'POST', body: fd });
+      const resp = await xhrPostForm('/add_watermark', fd);
       const data = await resp.json();
 
       progressWrap.style.display = 'none';
