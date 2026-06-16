@@ -23,6 +23,7 @@ import urllib.parse
 
 import db
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import TimedOut
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -582,12 +583,25 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await msg.delete()
             wm_label = "图片水印" if wm_type == "logo" else f"水印：{text}"
             caption_out = f"✅ {wm_label}{limit_note}"
-            if is_video:
-                with open(output_path, "rb") as f:
-                    await update.message.reply_video(f, caption=caption_out)
-            else:
-                with open(output_path, "rb") as f:
-                    await update.message.reply_photo(f, caption=caption_out)
+            # Uploading the result to Telegram can transiently time out even with
+            # generous timeouts configured, leaving the user with no result. Retry
+            # a few times on TimedOut before giving up.
+            send_attempts = 3
+            for attempt in range(1, send_attempts + 1):
+                try:
+                    if is_video:
+                        with open(output_path, "rb") as f:
+                            await update.message.reply_video(f, caption=caption_out)
+                    else:
+                        with open(output_path, "rb") as f:
+                            await update.message.reply_photo(f, caption=caption_out)
+                    break
+                except TimedOut:
+                    if attempt == send_attempts:
+                        raise
+                    logger.warning(
+                        "发送结果超时，正在重试（第 %d/%d 次）", attempt, send_attempts
+                    )
 
     except Exception as e:
         logger.error("处理媒体失败: %s", e, exc_info=True)
