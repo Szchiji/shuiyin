@@ -1,16 +1,2 @@
 [phases.setup]
 nixPkgs = ["ffmpeg", "python312", "wqy_zenhei", "fontconfig"]
-
-# Copy the CJK font out of the Nix store into the app's local `fonts/` directory
-# at build time. `_find_cjk_font()` checks `fonts/` first, so this guarantees the
-# Chinese watermark works at runtime without depending on the runtime image's
-# /nix/store layout (which previously caused the font to be missing on Railway).
-[phases.fonts]
-dependsOn = ["setup"]
-cmds = [
-    "mkdir -p fonts",
-    "src=$(find /nix/store -name 'wqy-zenhei.ttc' -print -quit 2>/dev/null); if [ -n \"$src\" ]; then cp \"$src\" fonts/wqy-zenhei.ttc && echo \"Bundled CJK font: $src -> fonts/wqy-zenhei.ttc\"; else echo 'WARNING: wqy-zenhei.ttc not found in /nix/store; runtime will fall back to system font search'; fi",
-]
-
-[phases.build]
-dependsOn = ["install", "fonts"]
