@@ -163,8 +163,17 @@ for d in ["uploads", "outputs", "fonts", "logos", "user_logos"]:
 
 def _find_cjk_font() -> str:
     """Locate a CJK-capable TrueType font, searching local dir then system paths."""
+    # Filenames of CJK-capable fonts we know how to locate, in order of preference.
+    cjk_font_names = [
+        "wqy-zenhei.ttc",
+        "wqy-microhei.ttc",
+        "NotoSansCJK-Regular.ttc",
+        "NotoSansSC-Regular.otf",
+        "NotoSerifCJK-Regular.ttc",
+        "simhei.ttf",
+    ]
     # Preferred local copies (committed or placed at runtime)
-    for name in ["wqy-zenhei.ttc", "simhei.ttf", "NotoSansCJK-Regular.ttc", "NotoSansSC-Regular.otf"]:
+    for name in cjk_font_names:
         p = os.path.join("fonts", name)
         if os.path.exists(p):
             return p
@@ -190,6 +199,21 @@ def _find_cjk_font() -> str:
     for c in candidates:
         if os.path.exists(c):
             return c
+    # Recursive search across common font roots. The earlier globs rely on exact
+    # directory layouts that vary between Nix/distro releases; this catches the
+    # font wherever the package actually placed it (e.g. share/fonts/**/wqy-*.ttc).
+    font_roots = [
+        "/nix/store/*/share/fonts",
+        "/usr/share/fonts",
+        "/usr/local/share/fonts",
+        os.path.expanduser("~/.local/share/fonts"),
+        os.path.expanduser("~/.fonts"),
+    ]
+    for name in cjk_font_names:
+        for root in font_roots:
+            match = next(iter(_glob.glob(os.path.join(root, "**", name), recursive=True)), None)
+            if match:
+                return match
     # Use fontconfig (fc-list) to locate any CJK-capable font installed in the system.
     # On Railway/Nix the binary may not be on PATH; fall back to a Nix-store glob.
     _fc_list = shutil.which("fc-list")
@@ -208,10 +232,22 @@ def _find_cjk_font() -> str:
                         return path
         except Exception as exc:
             logging.getLogger(__name__).warning("fc-list 字体查找失败: %s", exc)
+    # Last-resort recursive scan for any CJK-capable TrueType collection anywhere
+    # under the Nix store, matching common CJK font name fragments.
+    for fragment in ["*zenhei*.ttc", "*microhei*.ttc", "*[Cc][Jj][Kk]*.ttc", "*NotoSansSC*"]:
+        match = next(iter(_glob.glob(f"/nix/store/**/{fragment}", recursive=True)), None)
+        if match:
+            return match
     return os.path.join("fonts", "simhei.ttf")  # last resort fallback
 
 
 FONT_PATH = _find_cjk_font()
+if os.path.exists(FONT_PATH):
+    logging.getLogger(__name__).info("中文水印字体: %s", FONT_PATH)
+else:
+    logging.getLogger(__name__).warning(
+        "未找到中文字体，水印将回退到 Pillow 默认字体（无法显示中文）: %s", FONT_PATH
+    )
 
 # Ensure DB is initialised on startup even when bot is not running
 _db.init_db()
