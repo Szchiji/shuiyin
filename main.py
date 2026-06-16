@@ -232,10 +232,10 @@ def _find_cjk_font() -> str:
                         return path
         except Exception as exc:
             logging.getLogger(__name__).warning("fc-list 字体查找失败: %s", exc)
-    # Last-resort recursive scan for any CJK-capable TrueType collection anywhere
-    # under the Nix store, matching common CJK font name fragments.
+    # Last-resort recursive scan for any CJK-capable TrueType collection. Restrict
+    # to share/fonts subtrees so we never traverse the entire (huge) Nix store.
     for fragment in ["*zenhei*.ttc", "*microhei*.ttc", "*[Cc][Jj][Kk]*.ttc", "*NotoSansSC*"]:
-        match = next(iter(_glob.glob(f"/nix/store/**/{fragment}", recursive=True)), None)
+        match = next(iter(_glob.glob(f"/nix/store/*/share/fonts/**/{fragment}", recursive=True)), None)
         if match:
             return match
     return os.path.join("fonts", "simhei.ttf")  # last resort fallback
