@@ -1,0 +1,6 @@
+[build]
+# Pin the builder to Nixpacks so Railway reads nixpacks.toml and installs the
+# CJK font (wqy_zenhei), ffmpeg, fontconfig and Python 3.12. Without this,
+# Railway may default to Railpack, which ignores nixpacks.toml — causing the
+# "字体加载失败：cannot open resource" error and an unintended Python 3.13 runtime.
+builder = "NIXPACKS"
