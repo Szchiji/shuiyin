@@ -387,7 +387,7 @@
 
     <!-- ── Tab: Template settings ── -->
     <div id="tab-template" class="tab-panel">
-      <form method="post" action="/save_settings" enctype="multipart/form-data">
+      <form id="template-form" method="post" action="/save_settings" enctype="multipart/form-data">
         <div class="field">
           <label>水印类型</label>
           <select name="wm_type" id="tmpl-type" onchange="toggleLogoField()">
@@ -455,8 +455,11 @@
           </label>
         </div>
 
-        <button type="submit" class="btn btn-full btn-success">💾 保存模板</button>
+        <button type="submit" class="btn btn-full btn-success" id="save-template-btn">💾 保存模板</button>
       </form>
+
+      <div id="template-success" class="alert alert-success" style="display:none;margin-top:16px;">✅ 水印模板已保存！</div>
+      <div id="template-error" class="alert alert-error" style="display:none;margin-top:16px;"></div>
     </div>
   </div>
 
@@ -529,7 +532,41 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
-// ── Preview & drag ────────────────────────────────────────────────────────────
+// ── Template form submit (AJAX, Mini App友好) ───────────────────────────────────
+const templateForm = document.getElementById('template-form');
+const saveTemplateBtn = document.getElementById('save-template-btn');
+const templateSuccess = document.getElementById('template-success');
+const templateError = document.getElementById('template-error');
+
+templateForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  templateSuccess.style.display = 'none';
+  templateError.style.display = 'none';
+  saveTemplateBtn.disabled = true;
+
+  try {
+    const resp = await fetch('/save_settings', {
+      method: 'POST',
+      body: new FormData(templateForm),
+      headers: { 'X-Requested-With': 'fetch' },
+    });
+    if (resp.ok) {
+      templateSuccess.style.display = 'block';
+      templateSuccess.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+      let msg = '保存失败，请重试';
+      // Ignore JSON parse errors (e.g. empty/non-JSON body) and fall back to the default message
+      try { const d = await resp.json(); if (d && d.detail) msg = d.detail; } catch (parseErr) {}
+      templateError.textContent = '❌ ' + msg;
+      templateError.style.display = 'block';
+    }
+  } catch (err) {
+    templateError.textContent = '❌ 请求出错：' + err.message;
+    templateError.style.display = 'block';
+  } finally {
+    saveTemplateBtn.disabled = false;
+  }
+});
 const fileInput = document.getElementById('file');
 const previewWrap = document.getElementById('preview-wrap');
 const previewContainer = document.getElementById('preview-container');

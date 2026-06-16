@@ -604,6 +604,11 @@ async def save_settings(
     if logo_path:
         watermark_settings["logo_path"] = logo_path
     _db.save_watermark_settings(uid, **watermark_settings)
+    # Telegram Mini App webviews don't reliably handle full-page form-POST
+    # navigations, so the form submits via fetch(). Return JSON for those
+    # requests and keep the redirect for plain (non-JS) form submissions.
+    if request.headers.get("x-requested-with", "").lower() == "fetch":
+        return JSONResponse({"success": True})
     return RedirectResponse("/dashboard?saved=1", status_code=302)
 
 
