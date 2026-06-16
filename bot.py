@@ -626,7 +626,20 @@ def build_application() -> Application:
 
     db.init_db()
 
-    app = Application.builder().token(token).build()
+    # Use generous network timeouts.  On container startup (e.g. Railway)
+    # the first connection to api.telegram.org can be slow; the PTB defaults
+    # (5s) frequently raise "Timed out" and leave the bot disabled.
+    app = (
+        Application.builder()
+        .token(token)
+        .connect_timeout(30.0)
+        .read_timeout(30.0)
+        .write_timeout(30.0)
+        .pool_timeout(30.0)
+        .get_updates_connect_timeout(30.0)
+        .get_updates_read_timeout(30.0)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))

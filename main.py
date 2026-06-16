@@ -79,42 +79,64 @@ class LimitUploadSizeMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI):
     global _bot_app
     if os.getenv("BOT_TOKEN"):
-        try:
-            from bot import build_application  # noqa: PLC0415
-            bot_application = build_application()
-            await bot_application.initialize()
-            await bot_application.start()
-            if WEBHOOK_URL:
-                # Webhook mode: Telegram POSTs updates to our endpoint.
-                # This avoids the "Conflict: terminated by other getUpdates
-                # request" error that occurs when multiple instances (e.g.
-                # during a rolling deploy) each try to poll simultaneously.
-                token = os.getenv("BOT_TOKEN")
-                await bot_application.bot.set_webhook(
-                    url=f"{WEBHOOK_URL}/telegram-webhook/{token}"
-                )
-                logger.info("Telegram 机器人已启动（webhook 模式）")
-            else:
-                # Polling mode: suitable for local development only.
-                await bot_application.updater.start_polling()
-                logger.info("Telegram 机器人已启动（polling 模式）")
-            _bot_app = bot_application
-            # Set the menu button to open the Mini App (requires HTTPS URL).
-            web_url = os.getenv("WEB_URL", "").rstrip("/")
-            if web_url:
-                try:
-                    from telegram import MenuButtonWebApp, WebAppInfo  # noqa: PLC0415
-                    await bot_application.bot.set_chat_menu_button(
-                        menu_button=MenuButtonWebApp(
-                            text="水印",
-                            web_app=WebAppInfo(url=web_url),
-                        )
+        from bot import build_application  # noqa: PLC0415
+
+        # The first connection to Telegram on container startup can time out
+        # transiently.  Retry a few times so a single timeout doesn't leave
+        # the bot permanently disabled until the next deploy.
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            bot_application = None
+            try:
+                bot_application = build_application()
+                await bot_application.initialize()
+                await bot_application.start()
+                if WEBHOOK_URL:
+                    # Webhook mode: Telegram POSTs updates to our endpoint.
+                    # This avoids the "Conflict: terminated by other getUpdates
+                    # request" error that occurs when multiple instances (e.g.
+                    # during a rolling deploy) each try to poll simultaneously.
+                    token = os.getenv("BOT_TOKEN")
+                    await bot_application.bot.set_webhook(
+                        url=f"{WEBHOOK_URL}/telegram-webhook/{token}"
                     )
-                    logger.info("Telegram 机器人菜单按钮已设置为 Mini App: %s", web_url)
-                except Exception as e:
-                    logger.warning("设置 Mini App 菜单按钮失败: %s", e)
-        except Exception as e:
-            logger.error("Telegram 机器人启动失败: %s", e)
+                    logger.info("Telegram 机器人已启动（webhook 模式）")
+                else:
+                    # Polling mode: suitable for local development only.
+                    await bot_application.updater.start_polling()
+                    logger.info("Telegram 机器人已启动（polling 模式）")
+                _bot_app = bot_application
+                # Set the menu button to open the Mini App (requires HTTPS URL).
+                web_url = os.getenv("WEB_URL", "").rstrip("/")
+                if web_url:
+                    try:
+                        from telegram import MenuButtonWebApp, WebAppInfo  # noqa: PLC0415
+                        await bot_application.bot.set_chat_menu_button(
+                            menu_button=MenuButtonWebApp(
+                                text="水印",
+                                web_app=WebAppInfo(url=web_url),
+                            )
+                        )
+                        logger.info("Telegram 机器人菜单按钮已设置为 Mini App: %s", web_url)
+                    except Exception as e:
+                        logger.warning("设置 Mini App 菜单按钮失败: %s", e)
+                break
+            except Exception as e:
+                logger.error(
+                    "Telegram 机器人启动失败（第 %d/%d 次尝试）: %s",
+                    attempt, max_attempts, e,
+                )
+                # Clean up any partially-initialized application before retrying
+                # so we don't leak resources or leave it in a half-started state.
+                if bot_application is not None:
+                    try:
+                        await bot_application.shutdown()
+                    except Exception:
+                        pass
+                if attempt < max_attempts:
+                    await asyncio.sleep(5)
+                else:
+                    logger.error("Telegram 机器人启动失败，已放弃重试。")
     yield
     if _bot_app is not None:
         try:
