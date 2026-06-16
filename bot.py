@@ -23,7 +23,6 @@ import urllib.parse
 
 import db
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import TimedOut
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -583,39 +582,16 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await msg.delete()
             wm_label = "图片水印" if wm_type == "logo" else f"水印：{text}"
             caption_out = f"✅ {wm_label}{limit_note}"
-            # Uploading the result to Telegram can transiently time out even with
-            # generous timeouts configured, leaving the user with no result. Retry
-            # a few times on TimedOut before giving up.
-            send_attempts = 3
-            for attempt in range(1, send_attempts + 1):
-                try:
-                    if is_video:
-                        with open(output_path, "rb") as f:
-                            await update.message.reply_video(f, caption=caption_out)
-                    else:
-                        with open(output_path, "rb") as f:
-                            await update.message.reply_photo(f, caption=caption_out)
-                    break
-                except TimedOut:
-                    if attempt == send_attempts:
-                        raise
-                    logger.warning(
-                        "发送结果超时，正在重试（第 %d/%d 次）", attempt, send_attempts
-                    )
+            if is_video:
+                with open(output_path, "rb") as f:
+                    await update.message.reply_video(f, caption=caption_out)
+            else:
+                with open(output_path, "rb") as f:
+                    await update.message.reply_photo(f, caption=caption_out)
 
     except Exception as e:
         logger.error("处理媒体失败: %s", e, exc_info=True)
-        # The status message may already be deleted (e.g. the failure happened
-        # while sending the result) or unreachable (network timeout), so editing
-        # it can raise again. Fall back to a fresh reply and never let the error
-        # handler itself crash the update processing.
-        try:
-            await msg.edit_text(f"❌ 处理失败：{e}")
-        except Exception:
-            try:
-                await update.message.reply_text(f"❌ 处理失败：{e}")
-            except Exception:
-                logger.error("无法向用户发送处理失败提示", exc_info=True)
+        await msg.edit_text(f"❌ 处理失败：{e}")
 
 
 # ── Unified photo / document / video router ───────────────────────────────────
@@ -650,20 +626,7 @@ def build_application() -> Application:
 
     db.init_db()
 
-    # Telegram's default network timeouts (5s) are too short for uploading
-    # watermarked photos/videos, which caused httpx.ReadTimeout ("处理媒体失败:
-    # Timed out") when sending results back to the user. Use generous timeouts;
-    # media_write_timeout covers large file uploads specifically.
-    app = (
-        Application.builder()
-        .token(token)
-        .connect_timeout(30.0)
-        .read_timeout(60.0)
-        .write_timeout(60.0)
-        .pool_timeout(30.0)
-        .media_write_timeout(120.0)
-        .build()
-    )
+    app = Application.builder().token(token).build()
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
