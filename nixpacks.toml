@@ -9,7 +9,7 @@ nixPkgs = ["ffmpeg", "python312", "wqy_zenhei", "fontconfig"]
 dependsOn = ["setup"]
 cmds = [
     "mkdir -p fonts",
-    "cp \"$(find /nix/store -name 'wqy-zenhei.ttc' -print -quit 2>/dev/null)\" fonts/wqy-zenhei.ttc 2>/dev/null || true",
+    "src=$(find /nix/store -name 'wqy-zenhei.ttc' -print -quit 2>/dev/null); if [ -n \"$src\" ]; then cp \"$src\" fonts/wqy-zenhei.ttc && echo \"Bundled CJK font: $src -> fonts/wqy-zenhei.ttc\"; else echo 'WARNING: wqy-zenhei.ttc not found in /nix/store; runtime will fall back to system font search'; fi",
 ]
 
 [phases.build]
