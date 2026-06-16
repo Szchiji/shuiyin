@@ -158,7 +158,7 @@ app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, https_only=_HTTPS_O
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-for d in ["uploads", "outputs", "fonts", "logos", "user_logos"]:
+for d in ["uploads", "outputs", "fonts", "logos", _db.LOGO_DIR]:
     os.makedirs(d, exist_ok=True)
 
 def _find_cjk_font() -> str:
@@ -587,8 +587,8 @@ async def save_settings(
         await logo.seek(0)
         if not _valid_magic_bytes(logo_header, ext):
             raise HTTPException(status_code=400, detail="Logo 文件内容与扩展名不符，请上传真实的图片文件")
-        logo_path = f"user_logos/{uid}.{ext}"
-        os.makedirs("user_logos", exist_ok=True)
+        logo_path = os.path.join(_db.LOGO_DIR, f"{uid}.{ext}")
+        os.makedirs(_db.LOGO_DIR, exist_ok=True)
         with open(logo_path, "wb") as f:
             shutil.copyfileobj(logo.file, f)
 

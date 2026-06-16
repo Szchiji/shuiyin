@@ -8,6 +8,22 @@ from datetime import date, datetime, timedelta, timezone
 
 DB_PATH = os.getenv("DB_PATH", "watermark_bot.db")
 
+# Ensure the directory that holds the SQLite file exists. On platforms such as
+# Railway, DB_PATH usually points into a mounted volume (e.g.
+# "/data/watermark_bot.db"). sqlite3 cannot create missing parent directories
+# and would fail with "unable to open database file", which silently breaks
+# every write — including saving a watermark template. Creating it up-front
+# makes persistence work as soon as DB_PATH is configured.
+_DB_DIR = os.path.dirname(DB_PATH)
+if _DB_DIR:
+    os.makedirs(_DB_DIR, exist_ok=True)
+
+# Directory for user-uploaded logo template images. Co-locate it with the
+# database file so that logo (image) watermark templates persist on the same
+# volume as DB_PATH. When DB_PATH has no directory component (local default),
+# fall back to the historical relative "user_logos" directory.
+LOGO_DIR = os.path.join(_DB_DIR, "user_logos") if _DB_DIR else "user_logos"
+
 DAILY_LIMIT = 3  # free-tier daily usage cap
 
 
