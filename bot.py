@@ -591,7 +591,17 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     except Exception as e:
         logger.error("处理媒体失败: %s", e, exc_info=True)
-        await msg.edit_text(f"❌ 处理失败：{e}")
+        # The status message may already be deleted (e.g. the failure happened
+        # while sending the result) or unreachable (network timeout), so editing
+        # it can raise again. Fall back to a fresh reply and never let the error
+        # handler itself crash the update processing.
+        try:
+            await msg.edit_text(f"❌ 处理失败：{e}")
+        except Exception:
+            try:
+                await update.message.reply_text(f"❌ 处理失败：{e}")
+            except Exception:
+                logger.error("无法向用户发送处理失败提示", exc_info=True)
 
 
 # ── Unified photo / document / video router ───────────────────────────────────
