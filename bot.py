@@ -479,7 +479,7 @@ async def _save_logo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             reply_markup=_settings_kb(s),
         )
     except TimedOut:
-        logger.error("保存 logo 超时", exc_info=True)
+        logger.warning("保存 logo 超时")
         await msg.edit_text("⏳ 保存超时，可能是文件较大或网络不稳定，请稍后重试。")
     except Exception as e:
         logger.error("保存 logo 失败: %s", e, exc_info=True)
@@ -604,7 +604,7 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     await update.message.reply_photo(f, caption=caption_out)
 
     except TimedOut:
-        logger.error("处理媒体超时", exc_info=True)
+        logger.warning("处理媒体超时")
         await msg.edit_text("⏳ 处理超时，可能是文件较大或网络不稳定，请稍后重试。")
     except Exception as e:
         logger.error("处理媒体失败: %s", e, exc_info=True)
@@ -648,8 +648,8 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
             await update.effective_message.reply_text(
                 "⚠️ 处理时发生错误，请稍后重试。"
             )
-        except TelegramError:
-            pass
+        except TelegramError as notify_err:
+            logger.debug("通知用户失败: %s", notify_err)
 
 
 # ── Application factory ───────────────────────────────────────────────────────
