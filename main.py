@@ -22,11 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
-# MoviePy 1.x references PIL.Image.ANTIALIAS which was removed in Pillow 10.
-if not hasattr(Image, "ANTIALIAS"):
-    Image.ANTIALIAS = Image.LANCZOS  # type: ignore[attr-defined]
-
-from moviepy.editor import CompositeVideoClip, ImageClip, VideoFileClip
+from moviepy import CompositeVideoClip, ImageClip, VideoFileClip
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request as StarletteRequest
@@ -946,7 +942,7 @@ def _write_overlay_video(clip, overlay_img, output_path):
     os.close(tmp_fd)
     try:
         overlay_img.save(tmp_overlay)
-        overlay_clip = ImageClip(tmp_overlay).set_duration(clip.duration)
+        overlay_clip = ImageClip(tmp_overlay).with_duration(clip.duration)
         final = CompositeVideoClip([clip, overlay_clip])
         final.write_videofile(
             output_path,
@@ -954,7 +950,6 @@ def _write_overlay_video(clip, overlay_img, output_path):
             audio_codec="aac",
             threads=os.cpu_count() or 4,
             preset="medium",
-            verbose=False,
             logger=None,
         )
     finally:
@@ -973,10 +968,10 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
                 return True
             else:
                 logo_h = int(min(clip.w, clip.h) * max(5, min(100, logo_scale)) / 100)
-                logo_clip = ImageClip(logo_path).resize(height=logo_h)
-                logo_clip = logo_clip.set_duration(clip.duration).set_opacity(opacity / 100)
+                logo_clip = ImageClip(logo_path).resized(height=logo_h)
+                logo_clip = logo_clip.with_duration(clip.duration).with_opacity(opacity / 100)
                 pos = get_position(position, clip.w, clip.h, logo_clip.w, logo_clip.h, pos_x=pos_x, pos_y=pos_y)
-                logo_clip = logo_clip.set_position(pos)
+                logo_clip = logo_clip.with_position(pos)
                 final = CompositeVideoClip([clip, logo_clip])
         else:
             if tiled:
@@ -998,7 +993,6 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
             audio_codec="aac",
             threads=os.cpu_count() or 4,
             preset="medium",
-            verbose=False,
             logger=None,
         )
         return True
