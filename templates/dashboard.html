@@ -545,9 +545,13 @@ templateForm.addEventListener('submit', async (e) => {
   saveTemplateBtn.disabled = true;
 
   try {
+    const fd = new FormData(templateForm);
+    // Signal AJAX via a form field too, since some proxies/webviews strip
+    // custom request headers like X-Requested-With.
+    fd.append('ajax', '1');
     const resp = await fetch('/save_settings', {
       method: 'POST',
-      body: new FormData(templateForm),
+      body: fd,
       headers: { 'X-Requested-With': 'fetch' },
     });
     if (resp.ok) {
@@ -567,6 +571,8 @@ templateForm.addEventListener('submit', async (e) => {
     saveTemplateBtn.disabled = false;
   }
 });
+
+// ── Preview & drag ────────────────────────────────────────────────────────────
 const fileInput = document.getElementById('file');
 const previewWrap = document.getElementById('preview-wrap');
 const previewContainer = document.getElementById('preview-container');
