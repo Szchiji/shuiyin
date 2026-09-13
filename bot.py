@@ -78,6 +78,10 @@ def _wm_summary(s: dict) -> str:
         f"• 位置：{s['position']}",
         f"• 透明度：{s['opacity']}%",
         f"• 平铺：{'开' if s['tiled'] else '关'}",
+        f"• 颜色：{s.get('text_color') or '#FFFFFF'}",
+        f"• 描边：{'开' if s.get('stroke') else '关'}",
+        f"• 边距：{s.get('margin', 3)}%",
+        f"• 视频档：{'高质量' if s.get('video_quality') == 'hq' else '快速'}",
     ]
     return "\n".join(lines)
 
@@ -94,6 +98,16 @@ def _settings_kb(s: dict) -> InlineKeyboardMarkup:
     rows += [
         [InlineKeyboardButton(f"🔆 透明度: {s['opacity']}%", callback_data="set_opacity")],
         [InlineKeyboardButton(f"🔲 平铺: {'开' if s['tiled'] else '关'}", callback_data="toggle_tiled")],
+        [InlineKeyboardButton(f"🎨 颜色 {s.get('text_color') or '#FFF'}", callback_data="set_color"),
+         InlineKeyboardButton(f"🖌 描边: {'开' if s.get('stroke') else '关'}", callback_data="toggle_stroke")],
+        [InlineKeyboardButton(f"📏 边距: {s.get('margin', 3)}%", callback_data="set_margin"),
+         InlineKeyboardButton(f"🎞 {'高质量' if s.get('video_quality') == 'hq' else '快速'}", callback_data="set_vq")],
+        [InlineKeyboardButton("💾 存槽1", callback_data="preset_save_1"),
+         InlineKeyboardButton("💾 存槽2", callback_data="preset_save_2"),
+         InlineKeyboardButton("💾 存槽3", callback_data="preset_save_3")],
+        [InlineKeyboardButton("📂 槽1", callback_data="preset_load_1"),
+         InlineKeyboardButton("📂 槽2", callback_data="preset_load_2"),
+         InlineKeyboardButton("📂 槽3", callback_data="preset_load_3")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -437,7 +451,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     elif data == "template_text":
         context.user_data["awaiting"] = "template_text"
-        await query.edit_message_text("📝 请发送水印文字内容（支持中文/英文/emoji）：")
+        await query.edit_message_text("📝 请发送水印文字（可换行，支持中文/英文/emoji）：")
 
     elif data == "template_logo":
         context.user_data["awaiting"] = "template_logo"
@@ -524,6 +538,57 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"✅ 字号已设为：{new_size}%\n\n{_wm_summary(s)}",
             reply_markup=_settings_kb(s),
         )
+
+    elif data == "set_color":
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("白", callback_data="color_#FFFFFF"),
+                InlineKeyboardButton("黑", callback_data="color_#111111"),
+                InlineKeyboardButton("灰", callback_data="color_#94A3B8"),
+                InlineKeyboardButton("红", callback_data="color_#EF4444"),
+            ]
+        ])
+        await query.edit_message_text("🎨 请选择文字颜色：", reply_markup=kb)
+    elif data.startswith("color_"):
+        color = data.split("_", 1)[1]
+        db.save_watermark_settings(user_id, text_color=color)
+        s = db.get_watermark_settings(user_id)
+        await query.edit_message_text(f"✅ 文字颜色已设为 {color}\n\n{_wm_summary(s)}", reply_markup=_settings_kb(s))
+    elif data == "toggle_stroke":
+        s = db.get_watermark_settings(user_id)
+        new_stroke = 0 if s.get("stroke") else 1
+        db.save_watermark_settings(user_id, stroke=new_stroke)
+        s = db.get_watermark_settings(user_id)
+        await query.edit_message_text(f"✅ 描边已{'开启' if new_stroke else '关闭'}。\n\n{_wm_summary(s)}", reply_markup=_settings_kb(s))
+    elif data == "set_margin":
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{v}%", callback_data=f"margin_{v}") for v in (2, 3, 5, 8)]])
+        await query.edit_message_text("📏 请选择边距：", reply_markup=kb)
+    elif data.startswith("margin_"):
+        margin = int(data.split("_")[1])
+        db.save_watermark_settings(user_id, margin=margin)
+        s = db.get_watermark_settings(user_id)
+        await query.edit_message_text(f"✅ 边距已设为 {margin}%\n\n{_wm_summary(s)}", reply_markup=_settings_kb(s))
+    elif data == "set_vq":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("快速", callback_data="vq_fast"), InlineKeyboardButton("高质量", callback_data="vq_hq")]
+        ])
+        await query.edit_message_text("🎞 视频档位：", reply_markup=kb)
+    elif data.startswith("vq_"):
+        q = "hq" if data.endswith("hq") else "fast"
+        db.save_watermark_settings(user_id, video_quality=q)
+        s = db.get_watermark_settings(user_id)
+        await query.edit_message_text(f"✅ 视频档位：{'高质量' if q == 'hq' else '快速'}\n\n{_wm_summary(s)}", reply_markup=_settings_kb(s))
+    elif data.startswith("preset_save_"):
+        slot = int(data.rsplit("_", 1)[1])
+        db.save_preset(user_id, slot)
+        s = db.get_watermark_settings(user_id)
+        await query.edit_message_text(f"✅ 已保存到模板槽 {slot}\n\n{_wm_summary(s)}", reply_markup=_settings_kb(s))
+    elif data.startswith("preset_load_"):
+        slot = int(data.rsplit("_", 1)[1])
+        loaded = db.load_preset(user_id, slot)
+        s = db.get_watermark_settings(user_id)
+        tip = f"✅ 已加载模板槽 {slot}" if loaded else f"❌ 槽 {slot} 还是空的"
+        await query.edit_message_text(f"{tip}\n\n{_wm_summary(s)}", reply_markup=_settings_kb(s))
 
 
 # ── Text handler ──────────────────────────────────────────────────────────────
@@ -701,7 +766,10 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     text = s.get("text", "© Wei")
 
     # ── Process ───────────────────────────────────────────────────────────────
-    msg = await update.message.reply_text("⏳ 正在处理，请稍候…")
+    wait_text = "⏳ 正在处理视频，快速档通常 1～2 分钟…" if is_video else "⏳ 正在处理，请稍候…"
+    if is_video and s.get("video_quality") == "hq":
+        wait_text = "⏳ 正在处理视频（高质量），请稍候…"
+    msg = await update.message.reply_text(wait_text)
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, f"input.{ext}")
@@ -718,6 +786,10 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     input_path, output_path, text,
                     s["position"], s["opacity"], bool(s["tiled"]), logo_path,
                     None, None, s.get("font_size", 5), s.get("logo_scale", 20),
+                    s.get("text_color") or "#FFFFFF",
+                    int(s.get("stroke", 1) or 0),
+                    int(s.get("margin", 3) or 3),
+                    s.get("video_quality") or "fast",
                 )
             else:
                 success = await loop.run_in_executor(
@@ -726,6 +798,9 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     input_path, output_path, text,
                     s["position"], s["opacity"], bool(s["tiled"]), logo_path,
                     None, None, s.get("font_size", 5), s.get("logo_scale", 20),
+                    s.get("text_color") or "#FFFFFF",
+                    int(s.get("stroke", 1) or 0),
+                    int(s.get("margin", 3) or 3),
                 )
 
             if not success:
