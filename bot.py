@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 POSITIONS = ["左上", "右上", "左下", "右下", "居中", "中上", "中下"]
 LOGO_DIR = db.LOGO_DIR
 
+# ── Admin IDs (loaded once at import time) ────────────────────────────────────
+
 ADMIN_IDS: set[int] = {
     int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()
 }
@@ -58,7 +60,9 @@ def _admin_contact() -> str:
         return f"@{uname}"
     primary = next(iter(ADMIN_IDS), None)
     return f"管理员（ID: {primary}）" if primary else "管理员"
-  # ── Watermark display helpers ─────────────────────────────────────────────────
+
+
+# ── Watermark display helpers ─────────────────────────────────────────────────
 
 def _wm_summary(s: dict) -> str:
     type_label = "🖼 图片水印" if s["wm_type"] == "logo" else "📝 文字水印"
@@ -94,10 +98,13 @@ def _settings_kb(s: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+# ── /start ────────────────────────────────────────────────────────────────────
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     db.ensure_user(user.id, user.username or "", user.first_name or "")
     role = _role(user.id)
+
     role_label = {"admin": "👑 管理员", "member": "⭐ 会员", "regular": "👤 普通用户"}[role]
     text = (
         f"👋 你好，{user.first_name}！欢迎使用水印机器人。\n"
@@ -126,11 +133,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(text)
 
 
+# ── /status ───────────────────────────────────────────────────────────────────
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     db.ensure_user(user.id, user.username or "", user.first_name or "")
     role = _role(user.id)
     u = db.get_user(user.id)
+
     lines = [f"👤 {user.first_name}（ID: {user.id}）"]
     if role == "admin":
         lines.append("身份：👑 管理员")
@@ -145,10 +155,13 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"今日预填链接：{c_used}/{c_limit} 次",
             f"购买会员请联系 {_admin_contact()}",
         ]
+
     s = db.get_watermark_settings(user.id)
     lines += ["", _wm_summary(s)]
     await update.message.reply_text("\n".join(lines))
 
+
+# ── /template ─────────────────────────────────────────────────────────────────
 
 async def cmd_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -165,6 +178,8 @@ async def cmd_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+# ── /settings ─────────────────────────────────────────────────────────────────
+
 async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     db.ensure_user(user.id, user.username or "", user.first_name or "")
@@ -172,10 +187,13 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(_wm_summary(s), reply_markup=_settings_kb(s))
 
 
+# ── /help ─────────────────────────────────────────────────────────────────────
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     db.ensure_user(user.id, user.username or "", user.first_name or "")
     role = _role(user.id)
+
     text = (
         "📖 命令列表：\n\n"
         "/start — 欢迎页，查看身份和使用说明\n"
@@ -202,6 +220,10 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "/contact_set — 设置系统默认预填文案\n"
         )
     await update.message.reply_text(text)
+
+
+# ── Admin commands ────────────────────────────────────────────────────────────
+
 async def cmd_addmember(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_admin(update.effective_user.id):
         await update.message.reply_text("❌ 此命令仅限管理员使用。")
@@ -228,7 +250,7 @@ async def cmd_addmember(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             ),
         )
     except Exception:
-        pass
+        pass  # User may not have started the bot yet
 
 
 async def cmd_revokemember(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -262,7 +284,7 @@ async def cmd_userinfo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     role = db.get_effective_role(target_id, ADMIN_IDS)
     s = db.get_watermark_settings(target_id)
     lines = [
-        "👤 用户信息",
+        f"👤 用户信息",
         f"ID: {u['user_id']}",
         f"名字: {u['first_name'] or '—'}",
         f"用户名: {'@' + u['username'] if u['username'] else '—'}",
@@ -289,6 +311,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     await update.message.reply_text(text)
 
+
+# ── /webtoken ─────────────────────────────────────────────────────────────────
 
 async def cmd_webtoken(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -335,15 +359,11 @@ async def _reply_contact_result(update: Update, context: ContextTypes.DEFAULT_TY
     draft = contact.fill_template(db.get_contact_text(user.id), target, me_name=user.first_name or "")
     url = contact.build_prefill_url(target, draft)
     if url:
-        ok, err = _contact_quota_ok(user_id)
+        ok, err = _contact_quota_ok(user.id)
         if not ok:
             await update.effective_message.reply_text(err)
             return
-        await update.effective_message.reply_text(
-            contact.format_success_html(target, url),
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
+        await update.effective_message.reply_text(contact.format_success_html(target, url), parse_mode="HTML", disable_web_page_preview=True)
         return
     await update.effective_message.reply_text(contact.format_partial_html(target, draft), parse_mode="HTML")
 
@@ -353,8 +373,7 @@ async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     db.ensure_user(user.id, user.username or "", user.first_name or "")
     tpl = db.get_contact_text(user.id)
     await update.message.reply_text(
-        "私信预填用法：把对方的一条消息转发给我。\n"
-        "识别成功后会返回可复制 ID 和预填链接；点开链接后需自己点发送。\n\n"
+        "私信预填用法：把对方的一条消息转发给我。\n识别成功后会返回可复制 ID 和预填链接；点开链接后需自己点发送。\n\n"
         f"当前文案：\n{tpl}\n\n发送 /contact_tpl 可修改你的文案。"
     )
 
@@ -364,11 +383,7 @@ async def cmd_contact_tpl(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     db.ensure_user(user.id, user.username or "", user.first_name or "")
     context.user_data["awaiting"] = "contact_tpl"
     current = db.get_contact_text(user.id)
-    await update.message.reply_text(
-        "请发送新的预填文案（建议 500 字以内）。\n"
-        "可用占位符：{name} {username} {me}\n\n"
-        f"当前文案：\n{current}"
-    )
+    await update.message.reply_text(f"请发送新的预填文案（建议 500 字以内）。\n可用占位符：{{name}} {{username}} {{me}}\n\n当前文案：\n{current}")
 
 
 async def cmd_contact_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -399,6 +414,8 @@ async def handle_forwarded(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await _reply_contact_result(update, context, target)
 
 
+# ── Callback handler ──────────────────────────────────────────────────────────
+
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -411,9 +428,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             [InlineKeyboardButton("🖼 图片水印（Logo）", callback_data="template_logo")],
         ])
         await query.edit_message_text("请选择水印模板类型：", reply_markup=kb)
+
     elif data == "template_text":
         context.user_data["awaiting"] = "template_text"
         await query.edit_message_text("📝 请发送水印文字内容（支持中文/英文/emoji）：")
+
     elif data == "template_logo":
         context.user_data["awaiting"] = "template_logo"
         await query.edit_message_text(
@@ -422,11 +441,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "• 建议以「文件」方式发送以保持清晰度\n"
             "• 普通发送图片也可以"
         )
+
     elif data == "set_position":
         kb = InlineKeyboardMarkup(
             [[InlineKeyboardButton(p, callback_data=f"pos_{p}")] for p in POSITIONS]
         )
         await query.edit_message_text("📍 请选择水印位置：", reply_markup=kb)
+
     elif data.startswith("pos_"):
         new_pos = data[4:]
         db.save_watermark_settings(user_id, position=new_pos)
@@ -435,11 +456,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"✅ 位置已设为：{new_pos}\n\n{_wm_summary(s)}",
             reply_markup=_settings_kb(s),
         )
+
     elif data == "set_opacity":
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(f"{v}%", callback_data=f"opacity_{v}") for v in [25, 50, 75, 100]]
         ])
         await query.edit_message_text("🔆 请选择水印透明度：", reply_markup=kb)
+
     elif data.startswith("opacity_"):
         new_opacity = int(data.split("_")[1])
         db.save_watermark_settings(user_id, opacity=new_opacity)
@@ -448,6 +471,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"✅ 透明度已设为：{new_opacity}%\n\n{_wm_summary(s)}",
             reply_markup=_settings_kb(s),
         )
+
     elif data == "toggle_tiled":
         s = db.get_watermark_settings(user_id)
         new_tiled = 0 if s["tiled"] else 1
@@ -457,6 +481,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"✅ 平铺已{'开启' if new_tiled else '关闭'}。\n\n{_wm_summary(s)}",
             reply_markup=_settings_kb(s),
         )
+
     elif data == "set_logo_scale":
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(f"{v}%", callback_data=f"logo_scale_{v}") for v in [10, 15, 20, 25]],
@@ -464,6 +489,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             [InlineKeyboardButton(f"{v}%", callback_data=f"logo_scale_{v}") for v in [70, 80, 90, 100]],
         ])
         await query.edit_message_text("📐 请选择图片水印大小（占图片短边的百分比）：", reply_markup=kb)
+
     elif data.startswith("logo_scale_"):
         new_scale = int(data.split("_")[2])
         db.save_watermark_settings(user_id, logo_scale=new_scale)
@@ -472,12 +498,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"✅ 图片水印大小已设为：{new_scale}%\n\n{_wm_summary(s)}",
             reply_markup=_settings_kb(s),
         )
+
     elif data == "set_font_size":
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(f"{v}%", callback_data=f"font_size_{v}") for v in [3, 5, 7, 10]],
             [InlineKeyboardButton(f"{v}%", callback_data=f"font_size_{v}") for v in [13, 15, 20, 25]],
         ])
         await query.edit_message_text("🔤 请选择文字水印字号（占图片高度的百分比）：", reply_markup=kb)
+
     elif data.startswith("font_size_"):
         parts = data.split("_")
         if len(parts) != 3 or not parts[2].isdigit():
@@ -491,6 +519,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             reply_markup=_settings_kb(s),
         )
 
+
+# ── Text handler ──────────────────────────────────────────────────────────────
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
@@ -551,7 +581,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
 
 
+# ── Logo upload handler ───────────────────────────────────────────────────────
+
 async def _save_logo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Download the sent image and save it as this user's logo template."""
     user_id = update.effective_user.id
     msg = await update.message.reply_text("⏳ 正在保存水印图片…")
     try:
@@ -560,11 +593,14 @@ async def _save_logo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             fname = update.message.document.file_name or "logo.png"
             ext = pathlib.Path(fname).suffix.lower() or ".png"
         else:
+            # compressed photo from Telegram — save as jpg
             tg_file = await update.message.photo[-1].get_file()
             ext = ".jpg"
+
         os.makedirs(LOGO_DIR, exist_ok=True)
         logo_path = os.path.join(LOGO_DIR, f"{user_id}{ext}")
         await tg_file.download_to_drive(logo_path)
+
         db.save_watermark_settings(user_id, wm_type="logo", logo_path=logo_path)
         context.user_data.pop("awaiting", None)
         s = db.get_watermark_settings(user_id)
@@ -582,15 +618,22 @@ async def _save_logo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await msg.edit_text(f"❌ 保存失败：{e}")
 
 
+# ── Main media watermark handler ──────────────────────────────────────────────
+
 async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    from main import add_watermark_to_image, add_watermark_to_video
+    """Download media, apply saved watermark template, return result."""
+    from main import add_watermark_to_image, add_watermark_to_video  # noqa: PLC0415
+
     user = update.effective_user
     user_id = user.id
     db.ensure_user(user_id, user.username or "", user.first_name or "")
     role = _role(user_id)
+
+    # ── Determine file type first (validate before charging quota) ────────────
     is_video = False
     ext = "jpg"
     tg_file = None
+
     try:
         if update.message.photo:
             tg_file = await update.message.photo[-1].get_file()
@@ -616,13 +659,16 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await update.message.reply_text("❌ 请发送图片或视频文件。")
             return
     except TimedOut:
-        await update.message.reply_text("⏳ 获取文件超时，可能是文件较大或网络不稳定，请稍后重试。")
+        await update.message.reply_text(
+            "⏳ 获取文件超时，可能是文件较大或网络不稳定，请稍后重试。"
+        )
         return
     except TelegramError as e:
         logger.error("获取文件失败: %s", e, exc_info=True)
         await update.message.reply_text("❌ 获取文件失败，请稍后重试。")
         return
 
+    # ── Check / charge daily quota for regular users ──────────────────────────
     limit_note = ""
     if role == "regular":
         allowed, remaining = db.check_and_increment_usage(user_id)
@@ -638,40 +684,50 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         elif remaining == 1:
             limit_note = "\n（今日剩余 1 次）"
 
+    # ── Resolve watermark params from saved template ──────────────────────────
     s = db.get_watermark_settings(user_id)
     wm_type = s.get("wm_type", "text")
     logo_path = s.get("logo_path") if wm_type == "logo" else None
+    # Verify stored logo file still exists; fall back to text if missing
     if logo_path and not os.path.exists(logo_path):
         logo_path = None
         wm_type = "text"
     text = s.get("text", "© Wei")
+
+    # ── Process ───────────────────────────────────────────────────────────────
     msg = await update.message.reply_text("⏳ 正在处理，请稍候…")
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, f"input.{ext}")
             output_ext = "mp4" if is_video else "jpg"
             output_path = os.path.join(tmpdir, f"output.{output_ext}")
+
             await tg_file.download_to_drive(input_path)
+
             loop = asyncio.get_running_loop()
             if is_video:
                 success = await loop.run_in_executor(
-                    None, add_watermark_to_video,
+                    None,
+                    add_watermark_to_video,
                     input_path, output_path, text,
                     s["position"], s["opacity"], bool(s["tiled"]), logo_path,
                     None, None, s.get("font_size", 5), s.get("logo_scale", 20),
                 )
             else:
                 success = await loop.run_in_executor(
-                    None, add_watermark_to_image,
+                    None,
+                    add_watermark_to_image,
                     input_path, output_path, text,
                     s["position"], s["opacity"], bool(s["tiled"]), logo_path,
                     None, None, s.get("font_size", 5), s.get("logo_scale", 20),
                 )
+
             if not success:
                 if role == "regular":
                     db.refund_usage(user_id)
                 await msg.edit_text("❌ 处理失败，请重试。")
                 return
+
             await msg.delete()
             wm_label = "图片水印" if wm_type == "logo" else f"水印：{text}"
             caption_out = f"✅ {wm_label}{limit_note}"
@@ -681,6 +737,7 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             else:
                 with open(output_path, "rb") as f:
                     await update.message.reply_photo(f, caption=caption_out)
+
     except TimedOut:
         logger.warning("处理媒体超时")
         if role == "regular":
@@ -693,18 +750,24 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await msg.edit_text(f"❌ 处理失败：{e}")
 
 
+# ── Unified photo / document / video router ───────────────────────────────────
+
 async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Route to logo-save or watermark-apply based on current user state."""
     if contact.extract_forward_target(update.effective_message):
         await handle_forwarded(update, context)
         return
     awaiting = context.user_data.get("awaiting")
+
     if awaiting == "template_logo":
+        # Only accept images (photo or image-type document), not videos
         if update.message.video:
             await update.message.reply_text("❌ 请发送图片文件，而不是视频。")
             return
         if update.message.document:
             fname = update.message.document.file_name or ""
             ext = pathlib.Path(fname).suffix.lstrip(".").lower()
+            # Accept common image types; empty extension is ambiguous so we allow it
             if ext and ext not in {"png", "jpg", "jpeg", "webp", "gif"}:
                 await update.message.reply_text("❌ 请发送图片文件（png/jpg/webp）作为水印 Logo。")
                 return
@@ -713,7 +776,10 @@ async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await _apply_watermark(update, context)
 
 
+# ── Global error handler ──────────────────────────────────────────────────────
+
 async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log unhandled errors and notify the user when possible."""
     err = context.error
     if isinstance(err, TimedOut):
         logger.warning("网络超时: %s", err)
@@ -721,16 +787,25 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.error("未处理的异常: %s", err, exc_info=err)
     if isinstance(update, Update) and update.effective_message:
         try:
-            await update.effective_message.reply_text("⚠️ 处理时发生错误，请稍后重试。")
+            await update.effective_message.reply_text(
+                "⚠️ 处理时发生错误，请稍后重试。"
+            )
         except TelegramError as notify_err:
             logger.debug("通知用户失败: %s", notify_err)
 
+
+# ── Application factory ───────────────────────────────────────────────────────
 
 def build_application() -> Application:
     token = os.getenv("BOT_TOKEN")
     if not token:
         raise ValueError("BOT_TOKEN 环境变量未设置")
+
     db.init_db()
+
+    # Use generous network timeouts.  On container startup (e.g. Railway)
+    # the first connection to api.telegram.org can be slow; the PTB defaults
+    # (5s) frequently raise "Timed out" and leave the bot disabled.
     app = (
         Application.builder()
         .token(token)
@@ -742,11 +817,13 @@ def build_application() -> Application:
         .get_updates_read_timeout(30.0)
         .build()
     )
+
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("template", cmd_template))
     app.add_handler(CommandHandler("settings", cmd_settings))
     app.add_handler(CommandHandler("status", cmd_status))
+
     app.add_handler(CommandHandler("addmember", cmd_addmember))
     app.add_handler(CommandHandler("revokemember", cmd_revokemember))
     app.add_handler(CommandHandler("userinfo", cmd_userinfo))
@@ -756,6 +833,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("contact_tpl", cmd_contact_tpl))
     app.add_handler(CommandHandler("contact_set", cmd_contact_set))
     app.add_handler(CommandHandler("link", cmd_link))
+
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.FORWARDED, handle_forwarded))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
@@ -767,3 +845,4 @@ def build_application() -> Application:
     )
     app.add_error_handler(handle_error)
     return app
+
