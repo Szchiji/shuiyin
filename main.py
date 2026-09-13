@@ -94,7 +94,8 @@ async def lifespan(app: FastAPI):
                     # during a rolling deploy) each try to poll simultaneously.
                     token = os.getenv("BOT_TOKEN")
                     await bot_application.bot.set_webhook(
-                        url=f"{WEBHOOK_URL}/telegram-webhook/{token}"
+                        url=f"{WEBHOOK_URL}/telegram-webhook",
+                        secret_token=_webhook_secret(token),
                     )
                     logger.info("Telegram 机器人已启动（webhook 模式）")
                 else:
@@ -361,31 +362,44 @@ async def cleanup_file(path: str, delay: int = 300):
 
 # ── Telegram webhook endpoint ─────────────────────────────────────────────────
 
-@app.post("/telegram-webhook/{token}")
-async def telegram_webhook(token: str, request: Request):
-    """Receive updates from Telegram in webhook mode.
+def _webhook_secret(bot_token: str) -> str:
+    raw = hmac.new(b"shuiyin-webhook", (bot_token or "").encode(), hashlib.sha256).hexdigest()
+    return raw[:64]
 
-    The bot token in the path acts as a shared secret so that only Telegram
-    (which knows the token) can post updates here.
-    """
-    import secrets as _secrets  # noqa: PLC0415
-    bot_token = os.getenv("BOT_TOKEN", "")
-    # Capture local reference before any await so shutdown cannot null it out.
+
+async def _enqueue_telegram_update(request: Request):
     bot_application = _bot_app
-    if not _secrets.compare_digest(token, bot_token) or bot_application is None:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if bot_application is None:
+        raise HTTPException(status_code=503, detail="Bot not ready")
     from telegram import Update  # noqa: PLC0415
     try:
         data = await request.json()
         update = Update.de_json(data, bot_application.bot)
-        # Enqueue the update for the PTB background dispatcher rather than
-        # awaiting process_update() inline.  This returns 200 OK to Telegram
-        # immediately so it does not retry the update after its ~30 s timeout
-        # (which caused duplicate processing when video encoding took too long).
         await bot_application.update_queue.put(update)
     except Exception as exc:
         logger.error("处理 Telegram webhook 更新时出错: %s", exc)
     return {"ok": True}
+
+
+@app.post("/telegram-webhook")
+async def telegram_webhook(request: Request):
+    """Receive updates from Telegram. Auth via secret header, not the bot token."""
+    import secrets as _secrets  # noqa: PLC0415
+    expected = _webhook_secret(os.getenv("BOT_TOKEN", ""))
+    got = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not expected or not _secrets.compare_digest(got, expected):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return await _enqueue_telegram_update(request)
+
+
+@app.post("/telegram-webhook/{token}")
+async def telegram_webhook_legacy(token: str, request: Request):
+    """Legacy path kept so old webhook URLs do not 404 during rolling deploys."""
+    import secrets as _secrets  # noqa: PLC0415
+    bot_token = os.getenv("BOT_TOKEN", "")
+    if not bot_token or len(token) != len(bot_token) or not _secrets.compare_digest(token, bot_token):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return await _enqueue_telegram_update(request)
 
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
@@ -494,6 +508,11 @@ def _verify_webapp_init_data(init_data: str) -> dict | None:
         secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
         expected_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected_hash, received_hash):
+            return None
+        auth_date = params.get("auth_date")
+        if not auth_date or not str(auth_date).isdigit():
+            return None
+        if abs(_time.time() - int(auth_date)) > 300:
             return None
         user_json = params.get("user")
         if not user_json:
@@ -642,12 +661,16 @@ async def add_watermark(
     font_size = max(1, min(15, font_size))
     logo_scale = max(5, min(100, logo_scale))
 
-    # Session-based quota check for regular users
     u = _session_user(request)
-    if u and u["role"] == "regular":
+    if not u:
+        raise HTTPException(status_code=401, detail="请先登录")
+
+    charged = False
+    if u["role"] == "regular":
         allowed, _ = _db.check_and_increment_usage(u["user_id"])
         if not allowed:
             raise HTTPException(status_code=429, detail="今日使用次数已达上限")
+        charged = True
 
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     # Sanitize filenames to prevent path-traversal in upload directories
@@ -656,13 +679,23 @@ async def add_watermark(
 
     allowed_exts = {"jpg", "jpeg", "png", "webp", "mp4", "mov"}
     if ext not in allowed_exts:
+        if charged:
+            _db.refund_usage(u["user_id"])
         raise HTTPException(status_code=400, detail="不支持的文件类型")
+    if ext in {"mp4", "mov"} and u["role"] == "regular":
+        cl = request.headers.get("content-length")
+        if cl and int(cl) > 40 * 1024 * 1024:
+            if charged:
+                _db.refund_usage(u["user_id"])
+            raise HTTPException(status_code=413, detail="普通用户视频请小于 40MB")
 
     # Validate magic bytes for image uploads to reject disguised files
     if ext in ("jpg", "jpeg", "png", "webp"):
         header = await file.read(12)
         await file.seek(0)
         if not _valid_magic_bytes(header, ext):
+            if charged:
+                _db.refund_usage(u["user_id"])
             raise HTTPException(status_code=400, detail="文件内容与扩展名不符")
 
     input_path = f"uploads/{timestamp}_{safe_filename}"
@@ -696,10 +729,9 @@ async def add_watermark(
             # Use saved logo_scale if not explicitly overridden (form default is 20)
             logo_scale = max(5, min(100, saved_s.get("logo_scale", logo_scale)))
 
-    output_path = f"outputs/watermarked_{timestamp}.{ext}"
-    # Images are always re-saved as JPEG (RGB); use .jpg extension for consistency
+    output_path = f"outputs/watermarked_{u['user_id']}_{timestamp}.{ext}"
     if ext in ["jpg", "jpeg", "png", "webp"]:
-        output_path = f"outputs/watermarked_{timestamp}.jpg"
+        output_path = f"outputs/watermarked_{u['user_id']}_{timestamp}.jpg"
 
     loop = asyncio.get_running_loop()
     success = False
@@ -723,18 +755,19 @@ async def add_watermark(
         os.remove(logo_path)
 
     if success:
-        # Fix #4: schedule output file deletion after 300 s
         background_tasks.add_task(cleanup_file, output_path, 300)
         return {
             "success": True,
             "download_url": f"/download/{os.path.basename(output_path)}",
             "filename": os.path.basename(output_path),
         }
+    if charged:
+        _db.refund_usage(u["user_id"])
     return {"success": False, "error": "处理失败"}
 
 
 @app.get("/download/{filename}")
-async def download(filename: str):
+async def download(request: Request, filename: str):
     # Fix #1: strict whitelist — reconstruct filename from captured regex groups so
     # CodeQL / taint analysis sees a freshly-built string, not raw user input.
     m = re.match(r'^([\w\-]+)(\.\w+)?$', filename)
@@ -751,6 +784,13 @@ async def download(filename: str):
         raise HTTPException(status_code=400, detail="非法文件名")
     if not safe_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
+    u = _session_user(request)
+    if not u:
+        raise HTTPException(status_code=401, detail="请先登录")
+    if u["role"] != "admin":
+        prefix = f"watermarked_{u['user_id']}_"
+        if not clean_filename.startswith(prefix):
+            raise HTTPException(status_code=403, detail="无权下载该文件")
     return FileResponse(safe_path, filename=clean_filename)
 
 
