@@ -335,12 +335,38 @@ _DEFAULTS: dict = {
 }
 
 
+def _system_watermark_defaults() -> dict:
+    """Admin-configured defaults from 系统设置; fall back to hardcoded values."""
+    s = get_system_settings()
+    tiled_raw = str(s.get("default_tiled", _DEFAULTS["tiled"]))
+    try:
+        opacity = int(s.get("default_opacity", _DEFAULTS["opacity"]))
+    except (TypeError, ValueError):
+        opacity = _DEFAULTS["opacity"]
+    try:
+        font_size = int(s.get("default_font_size", _DEFAULTS["font_size"]))
+    except (TypeError, ValueError):
+        font_size = _DEFAULTS["font_size"]
+    return {
+        "wm_type": "text",
+        "text": s.get("default_text") or _DEFAULTS["text"],
+        "logo_path": None,
+        "position": s.get("default_position") or _DEFAULTS["position"],
+        "opacity": max(0, min(100, opacity)),
+        "tiled": 1 if tiled_raw in {"1", "true", "on"} else 0,
+        "font_size": max(1, min(15, font_size)),
+        "logo_scale": _DEFAULTS["logo_scale"],
+    }
+
+
 def get_watermark_settings(user_id: int) -> dict:
     with _conn() as conn:
         row = conn.execute(
             "SELECT * FROM watermark_settings WHERE user_id=?", (user_id,)
         ).fetchone()
-        return dict(row) if row else {"user_id": user_id, **_DEFAULTS}
+        if row:
+            return dict(row)
+        return {"user_id": user_id, **_system_watermark_defaults()}
 
 
 def save_watermark_settings(user_id: int, **kwargs) -> None:
