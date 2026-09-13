@@ -1,5 +1,6 @@
 """SQLite persistence layer for the watermark Telegram bot."""
 
+import json
 import os
 import secrets
 import sqlite3
@@ -106,6 +107,25 @@ def init_db() -> None:
         except sqlite3.OperationalError as e:
             if "duplicate column name" not in str(e).lower():
                 raise
+        for col_sql in (
+            "ALTER TABLE watermark_settings ADD COLUMN text_color TEXT NOT NULL DEFAULT '#FFFFFF'",
+            "ALTER TABLE watermark_settings ADD COLUMN stroke INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE watermark_settings ADD COLUMN margin INTEGER NOT NULL DEFAULT 3",
+            "ALTER TABLE watermark_settings ADD COLUMN video_quality TEXT NOT NULL DEFAULT 'fast'",
+        ):
+            try:
+                conn.execute(col_sql)
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" not in str(e).lower():
+                    raise
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS watermark_presets (
+                user_id INTEGER NOT NULL,
+                slot    INTEGER NOT NULL,
+                payload TEXT    NOT NULL DEFAULT '{}',
+                PRIMARY KEY (user_id, slot)
+            )
+        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (
                 key   TEXT PRIMARY KEY,
@@ -332,6 +352,10 @@ _DEFAULTS: dict = {
     "tiled": 0,
     "font_size": 5,
     "logo_scale": 20,
+    "text_color": "#FFFFFF",
+    "stroke": 1,
+    "margin": 3,
+    "video_quality": "fast",
 }
 
 
@@ -356,6 +380,10 @@ def _system_watermark_defaults() -> dict:
         "tiled": 1 if tiled_raw in {"1", "true", "on"} else 0,
         "font_size": max(1, min(15, font_size)),
         "logo_scale": _DEFAULTS["logo_scale"],
+        "text_color": s.get("default_text_color") or _DEFAULTS["text_color"],
+        "stroke": 1 if str(s.get("default_stroke", "1")) in {"1", "true", "on"} else 0,
+        "margin": int(s.get("default_margin", _DEFAULTS["margin"]) or _DEFAULTS["margin"]),
+        "video_quality": s.get("default_video_quality") or _DEFAULTS["video_quality"],
     }
 
 
@@ -376,8 +404,9 @@ def save_watermark_settings(user_id: int, **kwargs) -> None:
         conn.execute(
             """
             INSERT OR REPLACE INTO watermark_settings
-                (user_id, wm_type, text, logo_path, position, opacity, tiled, font_size, logo_scale)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (user_id, wm_type, text, logo_path, position, opacity, tiled, font_size, logo_scale,
+                 text_color, stroke, margin, video_quality)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -389,8 +418,56 @@ def save_watermark_settings(user_id: int, **kwargs) -> None:
                 current["tiled"],
                 current.get("font_size", 5),
                 current.get("logo_scale", 20),
+                current.get("text_color") or "#FFFFFF",
+                int(current.get("stroke", 1) or 0),
+                int(current.get("margin", 3) or 3),
+                current.get("video_quality") or "fast",
             ),
         )
+
+
+_PRESET_KEYS = (
+    "wm_type", "text", "logo_path", "position", "opacity", "tiled",
+    "font_size", "logo_scale", "text_color", "stroke", "margin", "video_quality",
+)
+
+
+def save_preset(user_id: int, slot: int) -> None:
+    slot = max(1, min(3, int(slot)))
+    s = get_watermark_settings(user_id)
+    payload = {k: s.get(k) for k in _PRESET_KEYS}
+    with _conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO watermark_presets (user_id, slot, payload) VALUES (?, ?, ?)",
+            (user_id, slot, json.dumps(payload, ensure_ascii=False)),
+        )
+
+
+def load_preset(user_id: int, slot: int) -> dict | None:
+    slot = max(1, min(3, int(slot)))
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT payload FROM watermark_presets WHERE user_id=? AND slot=?",
+            (user_id, slot),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        data = json.loads(row["payload"] or "{}")
+    except json.JSONDecodeError:
+        return None
+    save_watermark_settings(user_id, **{k: v for k, v in data.items() if k in _PRESET_KEYS})
+    return data
+
+
+def list_presets(user_id: int) -> dict[int, bool]:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT slot FROM watermark_presets WHERE user_id=?",
+            (user_id,),
+        ).fetchall()
+    found = {int(r["slot"]) for r in rows}
+    return {i: i in found for i in (1, 2, 3)}
 
 
 # ── Admin stats ───────────────────────────────────────────────────────────────
