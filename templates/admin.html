@@ -405,7 +405,22 @@
       <form method="post" action="/admin/settings">
         <div class="field">
           <label>默认水印文字</label>
-          <input type="text" name="default_text" value="{{ sys_settings.default_text or '© Wei' }}" />
+          <textarea name="default_text" rows="3" style="width:100%;padding:10px;border:1px solid #e5e5e5;border-radius:8px;resize:vertical;white-space:pre-wrap;">{{ sys_settings.default_text or '© Wei' }}</textarea>
+          <p class="hint">可换行。只对还没保存过个人模板的用户生效。</p>
+        </div>
+        <div class="field">
+          <label>默认颜色 / 描边 / 边距 / 视频档</label>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <input type="color" name="default_text_color" value="{{ sys_settings.default_text_color or '#FFFFFF' }}" />
+            <label class="checkbox-row" style="margin:0;">
+              <input type="checkbox" name="default_stroke" value="1" {% if sys_settings.default_stroke != '0' %}checked{% endif %} /> 描边
+            </label>
+            <input type="number" name="default_margin" min="0" max="15" value="{{ sys_settings.default_margin or '3' }}" style="width:72px;" title="边距%" />
+            <select name="default_video_quality">
+              <option value="fast" {% if sys_settings.default_video_quality != 'hq' %}selected{% endif %}>视频快速</option>
+              <option value="hq" {% if sys_settings.default_video_quality == 'hq' %}selected{% endif %}>视频高质量</option>
+            </select>
+          </div>
         </div>
         <div class="field">
           <label>默认水印位置</label>
