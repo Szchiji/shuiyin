@@ -316,6 +316,9 @@
   {% if request.query_params.get('saved') %}
   <div class="alert alert-success">✅ 水印模板已保存！</div>
   {% endif %}
+  {% if request.query_params.get('contact_saved') %}
+  <div class="alert alert-success">✅ 预填文案已保存！</div>
+  {% endif %}
 
   <!-- Usage info -->
   <div class="section">
@@ -343,6 +346,7 @@
     <div class="tabs">
       <button class="tab-btn active" onclick="switchTab('watermark', this)">🎨 添加水印</button>
       <button class="tab-btn" onclick="switchTab('template', this)">⚙️ 水印模板</button>
+      <button class="tab-btn" onclick="switchTab('contact', this)">✉️ 私信预填</button>
     </div>
 
     <!-- ── Tab: Add watermark ── -->
@@ -525,6 +529,17 @@
 
       <div id="template-success" class="alert alert-success" style="display:none;margin-top:16px;">✅ 水印模板已保存！</div>
       <div id="template-error" class="alert alert-error" style="display:none;margin-top:16px;"></div>
+    </div>
+
+    <div id="tab-contact" class="tab-panel">
+      <form method="post" action="/save_contact_text">
+        <div class="field">
+          <label>我的预填文案</label>
+          <textarea name="contact_text" rows="6" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;">{{ contact_text or '' }}</textarea>
+          <p class="hint">转发消息生成链接时使用这段文字。留空则用系统默认文案。可用 {name} {username} {me}</p>
+        </div>
+        <button type="submit" class="btn btn-full btn-success">💾 保存预填文案</button>
+      </form>
     </div>
   </div>
 
