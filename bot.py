@@ -363,7 +363,7 @@ async def _reply_contact_result(update: Update, context: ContextTypes.DEFAULT_TY
         if not ok:
             await update.effective_message.reply_text(err)
             return
-        await update.effective_message.reply_text(contact.format_success_html(target, url), parse_mode="HTML", disable_web_page_preview=True)
+        await update.effective_message.reply_text(contact.format_success_html(target, url, draft), parse_mode="HTML", disable_web_page_preview=True)
         return
     await update.effective_message.reply_text(contact.format_partial_html(target, draft), parse_mode="HTML")
 
