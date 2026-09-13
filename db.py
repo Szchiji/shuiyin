@@ -142,6 +142,10 @@ def init_db() -> None:
             "daily_limit": str(DAILY_LIMIT),
             "contact_default_text": "你好，想和你沟通一下，方便回复吗？",
             "contact_daily_limit": "10",
+            "default_text_color": "#FFFFFF",
+            "default_stroke": "1",
+            "default_margin": "3",
+            "default_video_quality": "fast",
         }
         for k, v in defaults.items():
             conn.execute(
