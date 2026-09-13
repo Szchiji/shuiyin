@@ -12,6 +12,7 @@ import subprocess as _subprocess
 import tempfile
 import time as _time
 import urllib.parse
+import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime
 from functools import partial, wraps
@@ -577,6 +578,7 @@ async def dashboard(request: Request):
         "used": used,
         "limit": limit,
         "contact_text": _db.get_contact_text(u["user_id"]),
+        "presets": _db.list_presets(u["user_id"]),
     })
 
 
@@ -593,6 +595,10 @@ async def save_settings(
     logo_scale: int = Form(20),
     logo: UploadFile = File(None),
     ajax: str = Form(""),
+    text_color: str = Form("#FFFFFF"),
+    stroke: str = Form("1"),
+    margin: int = Form(3),
+    video_quality: str = Form("fast"),
 ):
     u = _session_user(request)
     uid = u["user_id"]
@@ -621,6 +627,10 @@ async def save_settings(
         "tiled": int(tiled_bool),
         "font_size": max(1, min(15, font_size)),
         "logo_scale": max(5, min(100, logo_scale)),
+        "text_color": text_color if text_color.startswith("#") else "#FFFFFF",
+        "stroke": 1 if str(stroke).lower() in {"1", "true", "on"} else 0,
+        "margin": max(0, min(15, margin)),
+        "video_quality": "hq" if video_quality == "hq" else "fast",
     }
     if logo_path:
         watermark_settings["logo_path"] = logo_path
@@ -647,6 +657,24 @@ async def save_contact_text(request: Request, contact_text: str = Form("")):
     return RedirectResponse("/dashboard?contact_saved=1", status_code=302)
 
 
+@app.post("/presets/save")
+@_require_login
+async def preset_save(request: Request, slot: int = Form(1)):
+    u = _session_user(request)
+    _db.save_preset(u["user_id"], slot)
+    return RedirectResponse(f"/dashboard?preset_saved={max(1, min(3, slot))}", status_code=302)
+
+
+@app.post("/presets/load")
+@_require_login
+async def preset_load(request: Request, slot: int = Form(1)):
+    u = _session_user(request)
+    data = _db.load_preset(u["user_id"], slot)
+    if not data:
+        return RedirectResponse("/dashboard?preset_missing=1", status_code=302)
+    return RedirectResponse(f"/dashboard?preset_loaded={max(1, min(3, slot))}", status_code=302)
+
+
 # ── Watermark endpoint (session-aware) ────────────────────────────────────────
 
 
@@ -665,6 +693,10 @@ async def add_watermark(
     pos_x: float | None = Form(None),  # watermark centre X as % of image width (0–100)
     pos_y: float | None = Form(None),  # watermark centre Y as % of image height (0–100)
     use_saved_logo: str = Form("false"),  # use the user's saved logo template
+    text_color: str = Form("#FFFFFF"),
+    stroke: str = Form("1"),
+    margin: int = Form(3),
+    video_quality: str = Form("fast"),
 ):
     tiled_bool = tiled.lower() in ("true", "on", "1")  # Fix #2: parse manually
     font_size = max(1, min(15, font_size))
@@ -747,14 +779,21 @@ async def add_watermark(
     if ext in ["jpg", "jpeg", "png", "webp"]:
         success = await loop.run_in_executor(
             None,
-            partial(add_watermark_to_image,
-                    input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size, logo_scale),
+            partial(
+                add_watermark_to_image,
+                input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size, logo_scale,
+                text_color, 1 if str(stroke).lower() in {"1", "true", "on"} else 0, margin,
+            ),
         )
     elif ext in ["mp4", "mov"]:
         success = await loop.run_in_executor(
             None,
-            partial(add_watermark_to_video,
-                    input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size, logo_scale),
+            partial(
+                add_watermark_to_video,
+                input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size, logo_scale,
+                text_color, 1 if str(stroke).lower() in {"1", "true", "on"} else 0, margin,
+                "hq" if video_quality == "hq" else "fast",
+            ),
         )
 
     # Clean up uploaded originals immediately; never delete the user's saved logo template
@@ -905,7 +944,88 @@ async def admin_settings_save(
 
 # ── Image watermark ──────────────────────────────────────────────────────────
 
-def add_watermark_to_image(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20):
+def _hex_rgba(color: str, alpha: int) -> tuple[int, int, int, int]:
+    raw = (color or "#FFFFFF").strip().lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(ch * 2 for ch in raw)
+    if len(raw) != 6:
+        raw = "FFFFFF"
+    try:
+        r = int(raw[0:2], 16)
+        g = int(raw[2:4], 16)
+        b = int(raw[4:6], 16)
+    except ValueError:
+        r, g, b = 255, 255, 255
+    return r, g, b, max(0, min(255, int(alpha)))
+
+
+def _text_lines(text: str) -> list[str]:
+    lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return lines or [""]
+
+
+def _load_font(px_size: int):
+    try:
+        return ImageFont.truetype(FONT_PATH, px_size)
+    except (IOError, OSError, ValueError, RuntimeError) as e:
+        print(f"字体加载失败，使用默认字体: {e}")
+        return ImageFont.load_default()
+
+
+def _measure_multiline(draw, lines, font, spacing: int) -> tuple[int, int, list[tuple[int, int]]]:
+    sizes = []
+    max_w = 0
+    total_h = 0
+    for i, line in enumerate(lines):
+        bbox = draw.textbbox((0, 0), line or " ", font=font)
+        tw, th = max(1, bbox[2] - bbox[0]), max(1, bbox[3] - bbox[1])
+        sizes.append((tw, th))
+        max_w = max(max_w, tw)
+        total_h += th
+        if i < len(lines) - 1:
+            total_h += spacing
+    return max_w, max(1, total_h), sizes
+
+
+def _draw_multiline(draw, lines, font, origin, fill, stroke_w: int, sizes, spacing: int) -> None:
+    x0, y = origin
+    shadow = (0, 0, 0, max(40, fill[3] // 2) if len(fill) == 4 else 80)
+    stroke_fill = (0, 0, 0, fill[3] if len(fill) == 4 else 255)
+    for i, line in enumerate(lines):
+        tw, th = sizes[i]
+        xy = (x0, y)
+        draw.text((xy[0] + 2, xy[1] + 2), line, font=font, fill=shadow)
+        kwargs = {"font": font, "fill": fill}
+        if stroke_w:
+            kwargs["stroke_width"] = stroke_w
+            kwargs["stroke_fill"] = stroke_fill
+        draw.text(xy, line, **kwargs)
+        y += th + spacing
+
+
+def _paint_text_layer(size, text, font, opacity, color, stroke, tiled, position, pos_x, pos_y, margin):
+    w, h = size
+    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    lines = _text_lines(text)
+    spacing = max(4, int(font.size * 0.25)) if hasattr(font, "size") else 6
+    tw, th, sizes = _measure_multiline(draw, lines, font, spacing)
+    alpha = int(255 * opacity / 100)
+    fill = _hex_rgba(color, alpha)
+    stroke_w = max(0, int(stroke or 0))
+    if tiled:
+        spacing_x = int(tw * 1.8)
+        spacing_y = int(th * 2.0)
+        for x in range(-tw, w, max(8, spacing_x)):
+            for y in range(-th, h, max(8, spacing_y)):
+                _draw_multiline(draw, lines, font, (x, y), fill, stroke_w, sizes, spacing)
+    else:
+        pos = get_position(position, w, h, tw, th, pos_x=pos_x, pos_y=pos_y, margin_pct=margin)
+        _draw_multiline(draw, lines, font, pos, fill, stroke_w, sizes, spacing)
+    return layer
+
+
+def add_watermark_to_image(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20, text_color="#FFFFFF", stroke=1, margin=3):
     try:
         img = Image.open(input_path).convert("RGBA")
         w, h = img.size
@@ -931,36 +1051,15 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
                     for y in range(0, h, step):
                         img.paste(logo, (x, y), logo)
             else:
-                pos = get_position(position, w, h, new_w, new_h, pos_x=pos_x, pos_y=pos_y)
+                pos = get_position(position, w, h, new_w, new_h, pos_x=pos_x, pos_y=pos_y, margin_pct=margin)
                 img.paste(logo, pos, logo)
         else:
             px_size = max(12, int(h * font_size / 100))
-            try:
-                font = ImageFont.truetype(FONT_PATH, px_size)
-            except (IOError, OSError, ValueError, RuntimeError) as e:  # Fix #6
-                print(f"字体加载失败，使用默认字体: {e}")
-                font = ImageFont.load_default()
-
-            if tiled:
-                layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-                draw = ImageDraw.Draw(layer)
-                alpha = int(255 * opacity / 100)
-                bbox = draw.textbbox((0, 0), text, font=font)
-                tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                spacing_x = int(tw * 1.8)
-                spacing_y = int(th * 2.0)
-                for x in range(-tw, w, spacing_x):
-                    for y in range(-th, h, spacing_y):
-                        draw.text((x, y), text, fill=(255, 255, 255, alpha), font=font)
-                img = Image.alpha_composite(img, layer)
-            else:
-                draw = ImageDraw.Draw(img)
-                bbox = draw.textbbox((0, 0), text, font=font)
-                tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                pos = get_position(position, w, h, tw, th, pos_x=pos_x, pos_y=pos_y)
-                alpha = int(255 * opacity / 100)
-                draw.text((pos[0] + 2, pos[1] + 2), text, fill=(0, 0, 0, alpha), font=font)
-                draw.text(pos, text, fill=(255, 255, 255, alpha), font=font)
+            font = _load_font(px_size)
+            layer = _paint_text_layer(
+                (w, h), text, font, opacity, text_color, stroke, tiled, position, pos_x, pos_y, margin
+            )
+            img = Image.alpha_composite(img, layer)
 
         img.convert("RGB").save(output_path, quality=95)
         return True
@@ -971,46 +1070,20 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
 
 # ── Video watermark ──────────────────────────────────────────────────────────
 
-def _make_positioned_watermark_image(text, video_w, video_h, opacity, font_path, position, pos_x=None, pos_y=None, font_size=5):
-    """Build a full-frame RGBA PIL image with text at the specified position."""
+def _make_positioned_watermark_image(text, video_w, video_h, opacity, font_path, position, pos_x=None, pos_y=None, font_size=5, text_color="#FFFFFF", stroke=1, margin=3):
     px_size = max(12, int(video_h * font_size / 100))
-    try:
-        font = ImageFont.truetype(font_path, px_size)
-    except (IOError, OSError, ValueError, RuntimeError) as e:
-        print(f"视频水印字体加载失败，使用默认字体: {e}")
-        font = ImageFont.load_default()
-
-    layer = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    alpha = int(255 * opacity / 100)
-    bbox = draw.textbbox((0, 0), text, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    pos = get_position(position, video_w, video_h, tw, th, pos_x=pos_x, pos_y=pos_y)
-    draw.text((pos[0] + 2, pos[1] + 2), text, fill=(0, 0, 0, alpha), font=font)
-    draw.text(pos, text, fill=(255, 255, 255, alpha), font=font)
-    return layer
+    font = _load_font(px_size)
+    return _paint_text_layer(
+        (video_w, video_h), text, font, opacity, text_color, stroke, False, position, pos_x, pos_y, margin
+    )
 
 
-def _make_tiled_watermark_image(text, video_w, video_h, opacity, font_path, font_size=5):
-    """Build a full-frame RGBA PIL image with tiled text, same logic as image path."""
+def _make_tiled_watermark_image(text, video_w, video_h, opacity, font_path, font_size=5, text_color="#FFFFFF", stroke=1):
     px_size = max(12, int(video_h * font_size / 100))
-    try:
-        font = ImageFont.truetype(font_path, px_size)
-    except (IOError, OSError, ValueError, RuntimeError) as e:
-        print(f"视频水印字体加载失败，使用默认字体: {e}")
-        font = ImageFont.load_default()
-
-    layer = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    alpha = int(255 * opacity / 100)
-    bbox = draw.textbbox((0, 0), text, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    spacing_x = int(tw * 1.8)
-    spacing_y = int(th * 2.0)
-    for x in range(-tw, video_w, spacing_x):
-        for y in range(-th, video_h, spacing_y):
-            draw.text((x, y), text, fill=(255, 255, 255, alpha), font=font)
-    return layer
+    font = _load_font(px_size)
+    return _paint_text_layer(
+        (video_w, video_h), text, font, opacity, text_color, stroke, True, "居中", None, None, 3
+    )
 
 
 def _make_tiled_logo_image(logo_path, video_w, video_h, opacity, logo_scale):
@@ -1037,65 +1110,62 @@ def _make_tiled_logo_image(logo_path, video_w, video_h, opacity, logo_scale):
     return layer
 
 
-def _write_overlay_video(clip, overlay_img, output_path):
-    """Save *overlay_img* (RGBA PIL image) as a temp file, composite over *clip*, write output."""
+def _write_overlay_video(clip, overlay_img, output_path, video_quality="fast"):
     tmp_fd, tmp_overlay = tempfile.mkstemp(suffix=".png")
     os.close(tmp_fd)
     try:
         overlay_img.save(tmp_overlay)
         overlay_clip = ImageClip(tmp_overlay).with_duration(clip.duration)
         final = CompositeVideoClip([clip, overlay_clip])
-        final.write_videofile(
-            output_path,
-            codec="libx264",
-            audio_codec="aac",
-            threads=os.cpu_count() or 4,
-            preset="medium",
-            logger=None,
-        )
+        _export_video(final, output_path, video_quality)
     finally:
         if os.path.exists(tmp_overlay):
             os.remove(tmp_overlay)
 
 
-def add_watermark_to_video(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20):
+def _export_video(final, output_path, video_quality="fast"):
+    hq = (video_quality or "fast") == "hq"
+    final.write_videofile(
+        output_path,
+        codec="libx264",
+        audio_codec="aac",
+        threads=os.cpu_count() or 4,
+        preset="medium" if hq else "ultrafast",
+        ffmpeg_params=["-crf", "20" if hq else "28"],
+        logger=None,
+    )
+
+
+def add_watermark_to_video(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20, text_color="#FFFFFF", stroke=1, margin=3, video_quality="fast"):
     try:
         clip = VideoFileClip(input_path)
 
         if logo_path:
             if tiled:
                 overlay_img = _make_tiled_logo_image(logo_path, clip.w, clip.h, opacity, logo_scale)
-                _write_overlay_video(clip, overlay_img, output_path)
+                _write_overlay_video(clip, overlay_img, output_path, video_quality)
                 return True
-            else:
-                logo_h = int(min(clip.w, clip.h) * max(5, min(100, logo_scale)) / 100)
-                logo_clip = ImageClip(logo_path).resized(height=logo_h)
-                logo_clip = logo_clip.with_duration(clip.duration).with_opacity(opacity / 100)
-                pos = get_position(position, clip.w, clip.h, logo_clip.w, logo_clip.h, pos_x=pos_x, pos_y=pos_y)
-                logo_clip = logo_clip.with_position(pos)
-                final = CompositeVideoClip([clip, logo_clip])
+            logo_h = int(min(clip.w, clip.h) * max(5, min(100, logo_scale)) / 100)
+            logo_clip = ImageClip(logo_path).resized(height=logo_h)
+            logo_clip = logo_clip.with_duration(clip.duration).with_opacity(opacity / 100)
+            pos = get_position(position, clip.w, clip.h, logo_clip.w, logo_clip.h, pos_x=pos_x, pos_y=pos_y, margin_pct=margin)
+            logo_clip = logo_clip.with_position(pos)
+            final = CompositeVideoClip([clip, logo_clip])
         else:
             if tiled:
                 overlay_img = _make_tiled_watermark_image(
-                    text, clip.w, clip.h, opacity, FONT_PATH, font_size=font_size
+                    text, clip.w, clip.h, opacity, FONT_PATH, font_size=font_size,
+                    text_color=text_color, stroke=stroke,
                 )
-                _write_overlay_video(clip, overlay_img, output_path)
-                return True
             else:
                 overlay_img = _make_positioned_watermark_image(
-                    text, clip.w, clip.h, opacity, FONT_PATH, position, pos_x=pos_x, pos_y=pos_y, font_size=font_size
+                    text, clip.w, clip.h, opacity, FONT_PATH, position, pos_x=pos_x, pos_y=pos_y,
+                    font_size=font_size, text_color=text_color, stroke=stroke, margin=margin,
                 )
-                _write_overlay_video(clip, overlay_img, output_path)
-                return True
+            _write_overlay_video(clip, overlay_img, output_path, video_quality)
+            return True
 
-        final.write_videofile(
-            output_path,
-            codec="libx264",
-            audio_codec="aac",
-            threads=os.cpu_count() or 4,
-            preset="medium",
-            logger=None,
-        )
+        _export_video(final, output_path, video_quality)
         return True
     except Exception as e:
         print("视频处理错误:", e)
@@ -1104,12 +1174,16 @@ def add_watermark_to_video(input_path, output_path, text, position, opacity, til
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def get_position(pos_type, w, h, item_w, item_h, pos_x=None, pos_y=None):
+def get_position(pos_type, w, h, item_w, item_h, pos_x=None, pos_y=None, margin_pct=3):
     if pos_x is not None and pos_y is not None:
         x = int(w * pos_x / 100) - item_w // 2
         y = int(h * pos_y / 100) - item_h // 2
         return (max(0, min(w - item_w, x)), max(0, min(h - item_h, y)))
-    m = max(15, int(min(w, h) * 0.03))
+    try:
+        pct = max(0, min(15, int(margin_pct)))
+    except (TypeError, ValueError):
+        pct = 3
+    m = max(8, int(min(w, h) * pct / 100))
     if pos_type == "左上":
         return (m, m)
     if pos_type == "右上":
