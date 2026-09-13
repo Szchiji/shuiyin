@@ -576,6 +576,7 @@ async def dashboard(request: Request):
         "settings": s,
         "used": used,
         "limit": limit,
+        "contact_text": _db.get_contact_text(u["user_id"]),
     })
 
 
@@ -636,6 +637,14 @@ async def save_settings(
     if is_ajax:
         return JSONResponse({"success": True})
     return RedirectResponse("/dashboard?saved=1", status_code=302)
+
+
+@app.post("/save_contact_text")
+@_require_login
+async def save_contact_text(request: Request, contact_text: str = Form("")):
+    u = _session_user(request)
+    _db.save_contact_text(u["user_id"], contact_text or "")
+    return RedirectResponse("/dashboard?contact_saved=1", status_code=302)
 
 
 # ── Watermark endpoint (session-aware) ────────────────────────────────────────
