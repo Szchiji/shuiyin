@@ -319,6 +319,15 @@
   {% if request.query_params.get('contact_saved') %}
   <div class="alert alert-success">✅ 预填文案已保存！</div>
   {% endif %}
+  {% if request.query_params.get('preset_saved') %}
+  <div class="alert alert-success">✅ 已保存到模板槽 {{ request.query_params.get('preset_saved') }}</div>
+  {% endif %}
+  {% if request.query_params.get('preset_loaded') %}
+  <div class="alert alert-success">✅ 已加载模板槽 {{ request.query_params.get('preset_loaded') }}</div>
+  {% endif %}
+  {% if request.query_params.get('preset_missing') %}
+  <div class="alert alert-error">❌ 这个槽还是空的，先保存一次</div>
+  {% endif %}
 
   <!-- Usage info -->
   <div class="section">
@@ -355,7 +364,7 @@
         <div class="field">
           <label>上传文件 <span style="color:#e74c3c">*</span></label>
           <input type="file" id="file" name="file" accept=".jpg,.jpeg,.png,.webp,.mp4,.mov" required />
-          <p class="hint">支持 jpg / png / webp / mp4 / mov，最大 200 MB</p>
+          <p class="hint">支持 jpg / png / webp / mp4 / mov。一次请先传 1 个文件；批量可连续处理多张图（第一版先保证单张稳定）。最大 200 MB</p>
         </div>
 
         <!-- Preview & drag -->
@@ -375,7 +384,20 @@
 
         <div class="field" id="wm-text-field">
           <label>水印文字</label>
-          <input type="text" id="wm-text" name="text" value="{{ settings.text or '© Wei' }}" />
+          <textarea id="wm-text" name="text" rows="3" style="width:100%;padding:9px 13px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;white-space:pre-wrap;">{{ settings.text or '© Wei' }}</textarea>
+          <p class="hint">可换行。浅色图建议开描边。</p>
+        </div>
+        <div class="field" id="wm-style-field">
+          <label>文字颜色 / 描边 / 边距 / 视频档</label>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <input type="color" id="text_color" name="text_color" value="{{ settings.text_color or '#FFFFFF' }}" />
+            <label class="checkbox-row" style="margin:0;"><input type="checkbox" name="stroke" value="1" {% if settings.stroke != 0 %}checked{% endif %} /> 描边</label>
+            <input type="number" name="margin" min="0" max="15" value="{{ settings.margin or 3 }}" style="width:72px;" title="边距%" />
+            <select name="video_quality">
+              <option value="fast" {% if settings.video_quality != 'hq' %}selected{% endif %}>视频快速</option>
+              <option value="hq" {% if settings.video_quality == 'hq' %}selected{% endif %}>视频高质量</option>
+            </select>
+          </div>
         </div>
 
         <div class="field" id="position-field">
@@ -466,8 +488,20 @@
         </div>
 
         <div class="field" id="tmpl-text-field">
-          <label>水印文字</label>
-          <input type="text" name="text" value="{{ settings.text or '© Wei' }}" />
+          <label>水印文字（可换行）</label>
+          <textarea name="text" rows="3" style="width:100%;padding:9px 13px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;white-space:pre-wrap;">{{ settings.text or '© Wei' }}</textarea>
+        </div>
+        <div class="field">
+          <label>文字颜色 / 描边 / 边距 / 视频档</label>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <input type="color" name="text_color" value="{{ settings.text_color or '#FFFFFF' }}" />
+            <label class="checkbox-row" style="margin:0;"><input type="checkbox" name="stroke" value="1" {% if settings.stroke != 0 %}checked{% endif %} /> 描边</label>
+            <input type="number" name="margin" min="0" max="15" value="{{ settings.margin or 3 }}" style="width:72px;" />
+            <select name="video_quality">
+              <option value="fast" {% if settings.video_quality != 'hq' %}selected{% endif %}>视频快速</option>
+              <option value="hq" {% if settings.video_quality == 'hq' %}selected{% endif %}>视频高质量</option>
+            </select>
+          </div>
         </div>
 
         <div class="field" id="tmpl-logo-field" style="display:none;">
@@ -526,6 +560,22 @@
 
         <button type="submit" class="btn btn-full btn-success" id="save-template-btn">💾 保存模板</button>
       </form>
+      <div class="field" style="margin-top:18px;">
+        <label>模板槽（3 套）</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          {% for i in [1,2,3] %}
+          <form method="post" action="/presets/save" style="display:inline;">
+            <input type="hidden" name="slot" value="{{ i }}" />
+            <button type="submit" class="btn btn-sm">💾 存到槽{{ i }}</button>
+          </form>
+          <form method="post" action="/presets/load" style="display:inline;">
+            <input type="hidden" name="slot" value="{{ i }}" />
+            <button type="submit" class="btn btn-sm btn-primary" {% if not presets[i] %}disabled{% endif %}>📂 加载槽{{ i }}</button>
+          </form>
+          {% endfor %}
+        </div>
+        <p class="hint">先保存当前模板，再存进槽位。加载会覆盖当前模板。</p>
+      </div>
 
       <div id="template-success" class="alert alert-success" style="display:none;margin-top:16px;">✅ 水印模板已保存！</div>
       <div id="template-error" class="alert alert-error" style="display:none;margin-top:16px;"></div>
@@ -744,6 +794,8 @@ function updateWmLabel() {
   if (hasImg) {
     updateLogoPreview();
   } else {
+    wmTextLabel.style.whiteSpace = 'pre-line';
+    wmTextLabel.style.color = (document.getElementById('text_color') || {}).value || '#fff';
     wmTextLabel.textContent = hasLogo ? '🖼 Logo' : (textInput.value.trim() || '水印');
     wmDrag.style.width = '';
     wmDrag.style.height = '';
