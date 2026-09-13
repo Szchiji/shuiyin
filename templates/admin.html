@@ -448,10 +448,23 @@
         </div>
         <hr style="border:none;border-top:1px solid #f0f0f0;margin:20px 0;" />
         <div class="field">
-          <label>普通用户每日限额（次）</label>
+          <label>普通用户每日水印限额（次）</label>
           <input type="number" name="daily_limit" min="1" max="100"
                  value="{{ sys_settings.daily_limit or '3' }}" style="width:120px;" />
-          <p class="hint">修改后对当日已重置的用户立即生效，次日对所有普通用户生效</p>
+          <p class="hint">只限制加水印次数。修改后对当日已重置的用户立即生效</p>
+        </div>
+        <hr style="border:none;border-top:1px solid #f0f0f0;margin:20px 0;" />
+        <div class="card-title" style="padding:0 0 12px;">私信预填</div>
+        <div class="field">
+          <label>系统默认预填文案</label>
+          <textarea name="contact_default_text" rows="5" style="width:100%;padding:10px;border:1px solid #e5e5e5;border-radius:8px;resize:vertical;">{{ sys_settings.contact_default_text or '你好，想和你沟通一下，方便回复吗？' }}</textarea>
+          <p class="hint">用户未设置个人文案时使用这段。可用占位符 {name} {username} {me}。链接只会预填，不会自动发送。</p>
+        </div>
+        <div class="field">
+          <label>普通用户每日预填次数</label>
+          <input type="number" name="contact_daily_limit" min="1" max="200"
+                 value="{{ sys_settings.contact_daily_limit or '10' }}" style="width:120px;" />
+          <p class="hint">管理员和会员不限次数</p>
         </div>
         <button type="submit" class="btn btn-success btn-full">💾 保存设置</button>
       </form>
