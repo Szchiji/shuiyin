@@ -778,30 +778,50 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
             await tg_file.download_to_drive(input_path)
 
+            stop_tick = False
+
+            async def _tick_video():
+                elapsed = 0
+                while not stop_tick:
+                    await asyncio.sleep(5)
+                    elapsed += 5
+                    if stop_tick:
+                        return
+                    try:
+                        await msg.edit_text(f"{wait_text}\n已用时 {elapsed} 秒…")
+                    except Exception:
+                        return
+
+            tick_task = asyncio.create_task(_tick_video()) if is_video else None
             loop = asyncio.get_running_loop()
-            if is_video:
-                success = await loop.run_in_executor(
-                    None,
-                    add_watermark_to_video,
-                    input_path, output_path, text,
-                    s["position"], s["opacity"], bool(s["tiled"]), logo_path,
-                    None, None, s.get("font_size", 5), s.get("logo_scale", 20),
-                    s.get("text_color") or "#FFFFFF",
-                    int(s.get("stroke", 1) or 0),
-                    int(s.get("margin", 3) or 3),
-                    s.get("video_quality") or "fast",
-                )
-            else:
-                success = await loop.run_in_executor(
-                    None,
-                    add_watermark_to_image,
-                    input_path, output_path, text,
-                    s["position"], s["opacity"], bool(s["tiled"]), logo_path,
-                    None, None, s.get("font_size", 5), s.get("logo_scale", 20),
-                    s.get("text_color") or "#FFFFFF",
-                    int(s.get("stroke", 1) or 0),
-                    int(s.get("margin", 3) or 3),
-                )
+            try:
+                if is_video:
+                    success = await loop.run_in_executor(
+                        None,
+                        add_watermark_to_video,
+                        input_path, output_path, text,
+                        s["position"], s["opacity"], bool(s["tiled"]), logo_path,
+                        None, None, s.get("font_size", 5), s.get("logo_scale", 20),
+                        s.get("text_color") or "#FFFFFF",
+                        int(s.get("stroke", 1) or 0),
+                        int(s.get("margin", 3) or 3),
+                        s.get("video_quality") or "fast",
+                    )
+                else:
+                    success = await loop.run_in_executor(
+                        None,
+                        add_watermark_to_image,
+                        input_path, output_path, text,
+                        s["position"], s["opacity"], bool(s["tiled"]), logo_path,
+                        None, None, s.get("font_size", 5), s.get("logo_scale", 20),
+                        s.get("text_color") or "#FFFFFF",
+                        int(s.get("stroke", 1) or 0),
+                        int(s.get("margin", 3) or 3),
+                    )
+            finally:
+                stop_tick = True
+                if tick_task:
+                    tick_task.cancel()
 
             if not success:
                 if role == "regular":
