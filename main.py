@@ -878,6 +878,8 @@ async def admin_settings_save(
     default_font_size: int = Form(5),
     default_tiled: str = Form("0"),
     daily_limit: int = Form(3),
+    contact_default_text: str = Form("你好，想和你沟通一下，方便回复吗？"),
+    contact_daily_limit: int = Form(10),
 ):
     _db.save_system_settings(
         default_text=default_text,
@@ -885,7 +887,9 @@ async def admin_settings_save(
         default_opacity=default_opacity,
         default_font_size=max(1, min(15, default_font_size)),
         default_tiled="1" if default_tiled in ("1", "true", "on") else "0",
-        daily_limit=daily_limit,
+        daily_limit=max(1, min(100, daily_limit)),
+        contact_default_text=(contact_default_text or "").strip() or "你好，想和你沟通一下，方便回复吗？",
+        contact_daily_limit=max(1, min(200, contact_daily_limit)),
     )
     return RedirectResponse("/admin/settings?saved=1", status_code=302)
 
