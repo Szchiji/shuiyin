@@ -20,12 +20,14 @@ class ContactTarget:
     user_id: int | None = None
     phone: str | None = None
     hidden: bool = False
-    origin: str = ""
+    origin: str = ""  # user / hidden / channel / chat / unknown
 
 
 def extract_forward_target(message) -> ContactTarget | None:
+    """Return a target if *message* is a forward, else None."""
     if message is None:
         return None
+
     origin = getattr(message, "forward_origin", None)
     if origin is not None:
         sender = getattr(origin, "sender_user", None)
@@ -44,6 +46,7 @@ def extract_forward_target(message) -> ContactTarget | None:
             title = getattr(chat, "title", None) or getattr(chat, "full_name", "") or "频道/群组"
             return ContactTarget(display_name=title, origin="channel")
         return ContactTarget(origin="unknown")
+
     if getattr(message, "forward_from", None):
         u = message.forward_from
         return ContactTarget(
@@ -53,10 +56,17 @@ def extract_forward_target(message) -> ContactTarget | None:
             origin="user",
         )
     if getattr(message, "forward_sender_name", None):
-        return ContactTarget(display_name=message.forward_sender_name, hidden=True, origin="hidden")
+        return ContactTarget(
+            display_name=message.forward_sender_name,
+            hidden=True,
+            origin="hidden",
+        )
     if getattr(message, "forward_from_chat", None):
         chat = message.forward_from_chat
-        return ContactTarget(display_name=getattr(chat, "title", None) or "频道/群组", origin="channel")
+        return ContactTarget(
+            display_name=getattr(chat, "title", None) or "频道/群组",
+            origin="channel",
+        )
     return None
 
 
@@ -124,9 +134,9 @@ def format_success_html(target: ContactTarget, url: str, draft: str = "") -> str
         lines.append("预填文案：")
         lines.append(f"<code>{_esc(draft)}</code>")
         lines.append("")
-    lines.append("点下方链接打开私聊，文案已预填，需自己点发送。")
-    lines.append("")
-    lines.append(url)
+    lines.append("点按钮打开私聊，文案已预填，需自己点发送。")
+    href = url.replace("&", "&amp;")
+    lines.append(f'<a href="{href}">打开对方私聊</a>')
     return "\n".join(lines)
 
 
@@ -155,4 +165,8 @@ def _display_name(user) -> str:
 
 
 def _esc(text: str) -> str:
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
