@@ -363,7 +363,13 @@ async def _reply_contact_result(update: Update, context: ContextTypes.DEFAULT_TY
         if not ok:
             await update.effective_message.reply_text(err)
             return
-        await update.effective_message.reply_text(contact.format_success_html(target, url, draft), parse_mode="HTML", disable_web_page_preview=True)
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("打开私聊（文案已预填）", url=url)]])
+        await update.effective_message.reply_text(
+            contact.format_success_html(target, url, draft),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=kb,
+        )
         return
     await update.effective_message.reply_text(contact.format_partial_html(target, draft), parse_mode="HTML")
 
@@ -754,9 +760,6 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Route to logo-save or watermark-apply based on current user state."""
-    if contact.extract_forward_target(update.effective_message):
-        await handle_forwarded(update, context)
-        return
     awaiting = context.user_data.get("awaiting")
 
     if awaiting == "template_logo":
@@ -772,8 +775,10 @@ async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 await update.message.reply_text("❌ 请发送图片文件（png/jpg/webp）作为水印 Logo。")
                 return
         await _save_logo(update, context)
-    else:
-        await _apply_watermark(update, context)
+        return
+    if contact.extract_forward_target(update.effective_message):
+        await handle_forwarded(update, context)
+    await _apply_watermark(update, context)
 
 
 # ── Global error handler ──────────────────────────────────────────────────────
@@ -835,7 +840,12 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("link", cmd_link))
 
     app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.FORWARDED, handle_forwarded))
+    app.add_handler(
+        MessageHandler(
+            filters.FORWARDED & ~filters.PHOTO & ~filters.VIDEO & ~filters.Document.ALL,
+            handle_forwarded,
+        )
+    )
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(
         MessageHandler(
