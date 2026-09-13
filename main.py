@@ -677,12 +677,97 @@ async def preset_load(request: Request, slot: int = Form(1)):
 
 # ── Watermark endpoint (session-aware) ────────────────────────────────────────
 
+async def _add_watermark_batch(
+    request, background_tasks, u, uploads, timestamp, charged_count,
+    text, position, opacity, tiled_bool, font_size, logo_scale,
+    logo, pos_x, pos_y, use_saved_logo, text_color, stroke, margin, video_quality,
+):
+    image_exts = {"jpg", "jpeg", "png", "webp"}
+    prepared = []
+    for item in uploads:
+        safe_name = pathlib.Path(item.filename or "file").name
+        ext = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
+        if ext not in image_exts:
+            for _i in range(charged_count):
+                _db.refund_usage(u["user_id"])
+            raise HTTPException(status_code=400, detail="批量只支持图片（jpg/png/webp），视频请单独上传")
+        header = await item.read(12)
+        await item.seek(0)
+        if not _valid_magic_bytes(header, ext):
+            for _i in range(charged_count):
+                _db.refund_usage(u["user_id"])
+            raise HTTPException(status_code=400, detail=f"文件内容与扩展名不符：{safe_name}")
+        prepared.append((item, safe_name, ext))
+
+    saved_s = _db.get_watermark_settings(u["user_id"])
+    logo_path = None
+    if use_saved_logo.lower() in ("true", "1", "on"):
+        saved_logo = saved_s.get("logo_path")
+        if saved_logo and os.path.exists(saved_logo):
+            logo_path = saved_logo
+            logo_scale = max(5, min(100, saved_s.get("logo_scale", logo_scale)))
+
+    out_dir = f"outputs/batch_{u['user_id']}_{timestamp}"
+    os.makedirs(out_dir, exist_ok=True)
+    loop = asyncio.get_running_loop()
+    made = []
+    try:
+        for idx, (item, safe_name, ext) in enumerate(prepared, 1):
+            input_path = f"uploads/{timestamp}_{idx}_{safe_name}"
+            output_path = f"{out_dir}/{idx:02d}_{pathlib.Path(safe_name).stem}.jpg"
+            with open(input_path, "wb") as buffer:
+                shutil.copyfileobj(item.file, buffer)
+            ok = await loop.run_in_executor(
+                None,
+                partial(
+                    add_watermark_to_image,
+                    input_path, output_path, text, position, opacity, tiled_bool, logo_path,
+                    pos_x, pos_y, font_size, logo_scale, text_color,
+                    1 if str(stroke).lower() in {"1", "true", "on"} else 0, margin,
+                ),
+            )
+            if os.path.exists(input_path):
+                os.remove(input_path)
+            if not ok or not os.path.exists(output_path):
+                raise HTTPException(status_code=500, detail=f"处理失败：{safe_name}")
+            made.append(output_path)
+        zip_path = f"outputs/watermarked_{u['user_id']}_{timestamp}.zip"
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for path in made:
+                zf.write(path, arcname=os.path.basename(path))
+        for path in made:
+            if os.path.exists(path):
+                os.remove(path)
+        try:
+            os.rmdir(out_dir)
+        except OSError:
+            pass
+        background_tasks.add_task(cleanup_file, zip_path, 300)
+        return {
+            "success": True,
+            "download_url": f"/download/{os.path.basename(zip_path)}",
+            "filename": os.path.basename(zip_path),
+        }
+    except HTTPException:
+        for _i in range(charged_count):
+            _db.refund_usage(u["user_id"])
+        raise
+    except Exception as exc:
+        for _i in range(charged_count):
+            _db.refund_usage(u["user_id"])
+        logger.error("批量水印失败: %s", exc)
+        raise HTTPException(status_code=500, detail="批量处理失败") from exc
+
+
+
+
 
 @app.post("/add_watermark")
 async def add_watermark(
     request: Request,
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    files: list[UploadFile] = File(default=[]),
     text: str = Form("© Wei"),
     position: str = Form("右下"),
     opacity: int = Form(75),
@@ -706,15 +791,45 @@ async def add_watermark(
     if not u:
         raise HTTPException(status_code=401, detail="请先登录")
 
-    charged = False
+    uploads: list[UploadFile] = []
+    if file is not None and getattr(file, "filename", None):
+        uploads.append(file)
+    for extra in files or []:
+        if extra is not None and getattr(extra, "filename", None):
+            uploads.append(extra)
+    if not uploads:
+        raise HTTPException(status_code=400, detail="请上传文件")
+    # Deduplicate accidental double-binding of the same first file.
+    seen_names = set()
+    uniq: list[UploadFile] = []
+    for item in uploads:
+        key = (item.filename, getattr(item, "size", None))
+        if key in seen_names:
+            continue
+        seen_names.add(key)
+        uniq.append(item)
+    uploads = uniq
+
+    charged_count = 0
     if u["role"] == "regular":
-        allowed, _ = _db.check_and_increment_usage(u["user_id"])
-        if not allowed:
-            raise HTTPException(status_code=429, detail="今日使用次数已达上限")
-        charged = True
+        for _ in uploads:
+            allowed, _rem = _db.check_and_increment_usage(u["user_id"])
+            if not allowed:
+                for _i in range(charged_count):
+                    _db.refund_usage(u["user_id"])
+                raise HTTPException(status_code=429, detail="今日使用次数不足，无法批量处理这么多文件")
+            charged_count += 1
+    charged = charged_count > 0
 
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    # Sanitize filenames to prevent path-traversal in upload directories
+    if len(uploads) > 1:
+        return await _add_watermark_batch(
+            request, background_tasks, u, uploads, timestamp, charged_count,
+            text, position, opacity, tiled_bool, font_size, logo_scale,
+            logo, pos_x, pos_y, use_saved_logo, text_color, stroke, margin, video_quality,
+        )
+
+    file = uploads[0]
     safe_filename = pathlib.Path(file.filename).name
     ext = safe_filename.rsplit(".", 1)[-1].lower() if "." in safe_filename else ""
 
@@ -928,6 +1043,10 @@ async def admin_settings_save(
     daily_limit: int = Form(3),
     contact_default_text: str = Form("你好，想和你沟通一下，方便回复吗？"),
     contact_daily_limit: int = Form(10),
+    default_text_color: str = Form("#FFFFFF"),
+    default_stroke: str = Form("1"),
+    default_margin: int = Form(3),
+    default_video_quality: str = Form("fast"),
 ):
     _db.save_system_settings(
         default_text=default_text,
@@ -938,6 +1057,10 @@ async def admin_settings_save(
         daily_limit=max(1, min(100, daily_limit)),
         contact_default_text=(contact_default_text or "").strip() or "你好，想和你沟通一下，方便回复吗？",
         contact_daily_limit=max(1, min(200, contact_daily_limit)),
+        default_text_color=default_text_color if str(default_text_color).startswith("#") else "#FFFFFF",
+        default_stroke="1" if str(default_stroke).lower() in {"1", "true", "on"} else "0",
+        default_margin=max(0, min(15, int(default_margin))),
+        default_video_quality="hq" if default_video_quality == "hq" else "fast",
     )
     return RedirectResponse("/admin/settings?saved=1", status_code=302)
 
