@@ -388,12 +388,33 @@ async def _reply_contact_result(update: Update, context: ContextTypes.DEFAULT_TY
     await update.effective_message.reply_text(contact.format_partial_html(target, draft), parse_mode="HTML")
 
 
+def _target_from_typed_text(text: str, hint_name: str = "") -> contact.ContactTarget | None:
+    parsed = contact.parse_username_or_link(text)
+    if not parsed:
+        return None
+    if parsed.startswith("+"):
+        return contact.ContactTarget(display_name=hint_name or parsed, phone=parsed, origin="user")
+    return contact.ContactTarget(display_name=hint_name or parsed, username=parsed, origin="user")
+
+
 async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     db.ensure_user(user.id, user.username or "", user.first_name or "")
+    raw = " ".join(context.args or []).strip()
+    if raw:
+        target = _target_from_typed_text(raw)
+        if not target:
+            await update.message.reply_text("无法识别用户名。请发送 /contact @用户名")
+            return
+        await _reply_contact_result(update, context, target)
+        return
     tpl = db.get_contact_text(user.id)
     await update.message.reply_text(
-        "私信预填用法：把对方的一条消息转发给我。\n识别成功后会返回可复制 ID 和预填链接；点开链接后需自己点发送。\n\n"
+        "私信预填用法：\n"
+        "1. 转发对方的消息给我\n"
+        "2. 直接发送 @用户名 或 https://t.me/用户名\n"
+        "3. /contact @用户名\n"
+        "识别成功后会返回预填链接；点开后需自己点发送。手打用户名没有数字 ID。\n\n"
         f"当前文案：\n{tpl}\n\n发送 /contact_tpl 可修改你的文案。"
     )
 
@@ -618,15 +639,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"✅ 系统默认预填文案已更新：\n{text[:500]}")
         return
     if awaiting == "contact_username":
-        parsed = contact.parse_username_or_link(text)
-        if not parsed:
+        target = _target_from_typed_text(text, context.user_data.get("contact_hint_name") or "")
+        if not target:
             await update.message.reply_text("无法识别。请发送 @用户名 或 https://t.me/用户名")
             return
-        hint = context.user_data.get("contact_hint_name") or ""
-        if parsed.startswith("+"):
-            target = contact.ContactTarget(display_name=hint or parsed, phone=parsed, origin="user")
-        else:
-            target = contact.ContactTarget(display_name=hint or parsed, username=parsed, origin="user")
         context.user_data.pop("awaiting", None)
         context.user_data.pop("contact_hint_name", None)
         await _reply_contact_result(update, context, target)
@@ -645,9 +661,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             reply_markup=_settings_kb(s),
         )
     else:
+        typed = _target_from_typed_text(text)
+        if typed:
+            await _reply_contact_result(update, context, typed)
+            return
         await update.message.reply_text(
             "发送图片或视频来添加水印。\n"
-            "转发一条消息可生成预填私聊链接。\n"
+            "转发消息，或直接发送 @用户名，可生成预填私聊链接。\n"
             "使用 /template 设置水印，/contact 查看私信预填。"
         )
 
@@ -950,4 +970,3 @@ def build_application() -> Application:
     )
     app.add_error_handler(handle_error)
     return app
-
