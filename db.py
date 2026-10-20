@@ -112,6 +112,7 @@ def init_db() -> None:
             "ALTER TABLE watermark_settings ADD COLUMN stroke INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE watermark_settings ADD COLUMN margin INTEGER NOT NULL DEFAULT 3",
             "ALTER TABLE watermark_settings ADD COLUMN video_quality TEXT NOT NULL DEFAULT 'fast'",
+            "ALTER TABLE watermark_settings ADD COLUMN image_enhance TEXT NOT NULL DEFAULT 'light'",
         ):
             try:
                 conn.execute(col_sql)
@@ -146,6 +147,7 @@ def init_db() -> None:
             "default_stroke": "1",
             "default_margin": "3",
             "default_video_quality": "fast",
+            "default_image_enhance": "light",
         }
         for k, v in defaults.items():
             conn.execute(
@@ -360,6 +362,7 @@ _DEFAULTS: dict = {
     "stroke": 1,
     "margin": 3,
     "video_quality": "fast",
+    "image_enhance": "light",
 }
 
 
@@ -392,6 +395,11 @@ def _system_watermark_defaults() -> dict:
             if s.get("default_video_quality") in {"fast", "hq", "max"}
             else _DEFAULTS["video_quality"]
         ),
+        "image_enhance": (
+            s.get("default_image_enhance")
+            if s.get("default_image_enhance") in {"off", "light"}
+            else _DEFAULTS["image_enhance"]
+        ),
     }
 
 
@@ -413,8 +421,8 @@ def save_watermark_settings(user_id: int, **kwargs) -> None:
             """
             INSERT OR REPLACE INTO watermark_settings
                 (user_id, wm_type, text, logo_path, position, opacity, tiled, font_size, logo_scale,
-                 text_color, stroke, margin, video_quality)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 text_color, stroke, margin, video_quality, image_enhance)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -434,6 +442,11 @@ def save_watermark_settings(user_id: int, **kwargs) -> None:
                     if current.get("video_quality") in {"fast", "hq", "max"}
                     else "fast"
                 ),
+                (
+                    current.get("image_enhance")
+                    if current.get("image_enhance") in {"off", "light"}
+                    else "light"
+                ),
             ),
         )
 
@@ -441,6 +454,7 @@ def save_watermark_settings(user_id: int, **kwargs) -> None:
 _PRESET_KEYS = (
     "wm_type", "text", "logo_path", "position", "opacity", "tiled",
     "font_size", "logo_scale", "text_color", "stroke", "margin", "video_quality",
+    "image_enhance",
 )
 
 

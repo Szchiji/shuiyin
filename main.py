@@ -21,7 +21,7 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 from moviepy import CompositeVideoClip, ImageClip, VideoFileClip
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -599,6 +599,7 @@ async def save_settings(
     stroke: str = Form("1"),
     margin: int = Form(3),
     video_quality: str = Form("fast"),
+    image_enhance: str = Form("light"),
 ):
     u = _session_user(request)
     uid = u["user_id"]
@@ -631,6 +632,7 @@ async def save_settings(
         "stroke": 1 if str(stroke).lower() in {"1", "true", "on"} else 0,
         "margin": max(0, min(15, margin)),
         "video_quality": _normalize_video_quality(video_quality),
+        "image_enhance": _normalize_image_enhance(image_enhance),
     }
     if logo_path:
         watermark_settings["logo_path"] = logo_path
@@ -681,6 +683,7 @@ async def _add_watermark_batch(
     request, background_tasks, u, uploads, timestamp, charged_count,
     text, position, opacity, tiled_bool, font_size, logo_scale,
     logo, pos_x, pos_y, use_saved_logo, text_color, stroke, margin, video_quality,
+    image_enhance="light",
 ):
     image_exts = {"jpg", "jpeg", "png", "webp"}
     prepared = []
@@ -725,6 +728,7 @@ async def _add_watermark_batch(
                     input_path, output_path, text, position, opacity, tiled_bool, logo_path,
                     pos_x, pos_y, font_size, logo_scale, text_color,
                     1 if str(stroke).lower() in {"1", "true", "on"} else 0, margin,
+                    _normalize_image_enhance(image_enhance),
                 ),
             )
             if os.path.exists(input_path):
@@ -783,6 +787,7 @@ async def add_watermark(
     stroke: str = Form("1"),
     margin: int = Form(3),
     video_quality: str = Form("fast"),
+    image_enhance: str = Form("light"),
 ):
     tiled_bool = tiled.lower() in ("true", "on", "1")  # Fix #2: parse manually
     font_size = max(1, min(15, font_size))
@@ -828,6 +833,7 @@ async def add_watermark(
             request, background_tasks, u, uploads, timestamp, charged_count,
             text, position, opacity, tiled_bool, font_size, logo_scale,
             logo, pos_x, pos_y, use_saved_logo, text_color, stroke, margin, video_quality,
+            image_enhance,
         )
 
     file = uploads[0]
@@ -898,6 +904,7 @@ async def add_watermark(
                 add_watermark_to_image,
                 input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size, logo_scale,
                 text_color, 1 if str(stroke).lower() in {"1", "true", "on"} else 0, margin,
+                _normalize_image_enhance(image_enhance),
             ),
         )
     elif ext in ["mp4", "mov"]:
@@ -1047,6 +1054,7 @@ async def admin_settings_save(
     default_stroke: str = Form("1"),
     default_margin: int = Form(3),
     default_video_quality: str = Form("fast"),
+    default_image_enhance: str = Form("light"),
 ):
     _db.save_system_settings(
         default_text=default_text,
@@ -1061,6 +1069,7 @@ async def admin_settings_save(
         default_stroke="1" if str(default_stroke).lower() in {"1", "true", "on"} else "0",
         default_margin=max(0, min(15, int(default_margin))),
         default_video_quality=_normalize_video_quality(default_video_quality),
+        default_image_enhance=_normalize_image_enhance(default_image_enhance),
     )
     return RedirectResponse("/admin/settings?saved=1", status_code=302)
 
@@ -1157,6 +1166,29 @@ def _image_output_ext(input_path) -> str:
     return "jpg"
 
 
+
+def _normalize_image_enhance(image_enhance) -> str:
+    """Accept off / light; default light."""
+    q = (image_enhance or "light").strip().lower()
+    return q if q in {"off", "light"} else "light"
+
+
+def _apply_image_enhance(img, image_enhance="light"):
+    """Mild UnsharpMask before save; preserves alpha, avoids strong halos."""
+    if _normalize_image_enhance(image_enhance) != "light":
+        return img
+    # radius/percent/threshold kept conservative to limit ringing
+    usm = ImageFilter.UnsharpMask(radius=1.2, percent=115, threshold=3)
+    if img.mode == "RGBA":
+        r, g, b, a = img.split()
+        rgb = Image.merge("RGB", (r, g, b)).filter(usm)
+        r2, g2, b2 = rgb.split()
+        return Image.merge("RGBA", (r2, g2, b2, a))
+    if img.mode == "RGB":
+        return img.filter(usm)
+    return img.convert("RGB").filter(usm).convert(img.mode)
+
+
 def _save_watermarked_image(img, output_path, input_path):
     """Save watermarked image in source format; JPEG only converts to RGB."""
     ext = _image_output_ext(input_path)
@@ -1174,7 +1206,7 @@ def _save_watermarked_image(img, output_path, input_path):
         )
 
 
-def add_watermark_to_image(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20, text_color="#FFFFFF", stroke=1, margin=3):
+def add_watermark_to_image(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20, text_color="#FFFFFF", stroke=1, margin=3, image_enhance="light"):
     try:
         img = Image.open(input_path).convert("RGBA")
         w, h = img.size
@@ -1210,6 +1242,7 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
             )
             img = Image.alpha_composite(img, layer)
 
+        img = _apply_image_enhance(img, image_enhance)
         _save_watermarked_image(img, output_path, input_path)
         return True
     except Exception as e:

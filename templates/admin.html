@@ -421,6 +421,10 @@
               <option value="hq" {% if sys_settings.default_video_quality == 'hq' %}selected{% endif %}>视频高质量</option>
               <option value="max" {% if sys_settings.default_video_quality == 'max' %}selected{% endif %}>视频保真</option>
             </select>
+            <select name="default_image_enhance" title="图片增强">
+              <option value="light" {% if sys_settings.default_image_enhance != 'off' %}selected{% endif %}>轻度锐化</option>
+              <option value="off" {% if sys_settings.default_image_enhance == 'off' %}selected{% endif %}>不锐化</option>
+            </select>
           </div>
         </div>
         <div class="field">
