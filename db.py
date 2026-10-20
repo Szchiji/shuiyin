@@ -387,7 +387,11 @@ def _system_watermark_defaults() -> dict:
         "text_color": s.get("default_text_color") or _DEFAULTS["text_color"],
         "stroke": 1 if str(s.get("default_stroke", "1")) in {"1", "true", "on"} else 0,
         "margin": int(s.get("default_margin", _DEFAULTS["margin"]) or _DEFAULTS["margin"]),
-        "video_quality": s.get("default_video_quality") or _DEFAULTS["video_quality"],
+        "video_quality": (
+            s.get("default_video_quality")
+            if s.get("default_video_quality") in {"fast", "hq", "max"}
+            else _DEFAULTS["video_quality"]
+        ),
     }
 
 
@@ -425,7 +429,11 @@ def save_watermark_settings(user_id: int, **kwargs) -> None:
                 current.get("text_color") or "#FFFFFF",
                 int(current.get("stroke", 1) or 0),
                 int(current.get("margin", 3) or 3),
-                current.get("video_quality") or "fast",
+                (
+                    current.get("video_quality")
+                    if current.get("video_quality") in {"fast", "hq", "max"}
+                    else "fast"
+                ),
             ),
         )
 

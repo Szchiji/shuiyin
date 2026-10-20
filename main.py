@@ -630,7 +630,7 @@ async def save_settings(
         "text_color": text_color if text_color.startswith("#") else "#FFFFFF",
         "stroke": 1 if str(stroke).lower() in {"1", "true", "on"} else 0,
         "margin": max(0, min(15, margin)),
-        "video_quality": "hq" if video_quality == "hq" else "fast",
+        "video_quality": _normalize_video_quality(video_quality),
     }
     if logo_path:
         watermark_settings["logo_path"] = logo_path
@@ -907,7 +907,7 @@ async def add_watermark(
                 add_watermark_to_video,
                 input_path, output_path, text, position, opacity, tiled_bool, logo_path, pos_x, pos_y, font_size, logo_scale,
                 text_color, 1 if str(stroke).lower() in {"1", "true", "on"} else 0, margin,
-                "hq" if video_quality == "hq" else "fast",
+                _normalize_video_quality(video_quality),
             ),
         )
 
@@ -1060,7 +1060,7 @@ async def admin_settings_save(
         default_text_color=default_text_color if str(default_text_color).startswith("#") else "#FFFFFF",
         default_stroke="1" if str(default_stroke).lower() in {"1", "true", "on"} else "0",
         default_margin=max(0, min(15, int(default_margin))),
-        default_video_quality="hq" if default_video_quality == "hq" else "fast",
+        default_video_quality=_normalize_video_quality(default_video_quality),
     )
     return RedirectResponse("/admin/settings?saved=1", status_code=302)
 
@@ -1246,17 +1246,62 @@ def _write_overlay_video(clip, overlay_img, output_path, video_quality="fast"):
             os.remove(tmp_overlay)
 
 
+def _normalize_video_quality(video_quality) -> str:
+    """Accept fast / hq / max; anything else falls back to fast."""
+    q = (video_quality or "fast").strip().lower()
+    return q if q in {"fast", "hq", "max"} else "fast"
+
+
+def _video_export_settings(video_quality="fast") -> dict:
+    """Map quality tier to MoviePy/ffmpeg knobs (also used by unit checks)."""
+    q = _normalize_video_quality(video_quality)
+    if q == "max":
+        return {
+            "tier": "max",
+            "preset": "slow",
+            "crf": 16,
+            "ffmpeg_params": ["-crf", "16", "-pix_fmt", "yuv420p"],
+            "prefer_audio_copy": True,
+        }
+    if q == "hq":
+        return {
+            "tier": "hq",
+            "preset": "medium",
+            "crf": 18,
+            "ffmpeg_params": ["-crf", "18", "-pix_fmt", "yuv420p"],
+            "prefer_audio_copy": False,
+        }
+    return {
+        "tier": "fast",
+        "preset": "ultrafast",
+        "crf": 28,
+        "ffmpeg_params": ["-crf", "28"],
+        "prefer_audio_copy": False,
+    }
+
+
 def _export_video(final, output_path, video_quality="fast"):
-    hq = (video_quality or "fast") == "hq"
-    final.write_videofile(
-        output_path,
+    cfg = _video_export_settings(video_quality)
+    common = dict(
         codec="libx264",
-        audio_codec="aac",
         threads=os.cpu_count() or 4,
-        preset="medium" if hq else "ultrafast",
-        ffmpeg_params=["-crf", "20" if hq else "28"],
+        preset=cfg["preset"],
+        ffmpeg_params=list(cfg["ffmpeg_params"]),
         logger=None,
     )
+    # Do not pass fps/size — MoviePy keeps the composite clip's source fps/resolution.
+    if cfg["prefer_audio_copy"] and getattr(final, "audio", None) is not None:
+        try:
+            final.write_videofile(output_path, audio_codec="copy", **common)
+            return
+        except Exception as e:
+            print("音频 copy 失败，回退 AAC:", e)
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+    final.write_videofile(output_path, audio_codec="aac", **common)
 
 
 def add_watermark_to_video(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20, text_color="#FFFFFF", stroke=1, margin=3, video_quality="fast"):

@@ -394,8 +394,9 @@
             <label class="checkbox-row" style="margin:0;"><input type="checkbox" name="stroke" value="1" {% if settings.stroke != 0 %}checked{% endif %} /> 描边</label>
             <input type="number" name="margin" min="0" max="15" value="{{ settings.margin or 3 }}" style="width:72px;" title="边距%" />
             <select name="video_quality">
-              <option value="fast" {% if settings.video_quality != 'hq' %}selected{% endif %}>视频快速</option>
+              <option value="fast" {% if settings.video_quality != 'hq' and settings.video_quality != 'max' %}selected{% endif %}>视频快速</option>
               <option value="hq" {% if settings.video_quality == 'hq' %}selected{% endif %}>视频高质量</option>
+              <option value="max" {% if settings.video_quality == 'max' %}selected{% endif %}>视频保真</option>
             </select>
           </div>
         </div>
@@ -498,8 +499,9 @@
             <label class="checkbox-row" style="margin:0;"><input type="checkbox" name="stroke" value="1" {% if settings.stroke != 0 %}checked{% endif %} /> 描边</label>
             <input type="number" name="margin" min="0" max="15" value="{{ settings.margin or 3 }}" style="width:72px;" />
             <select name="video_quality">
-              <option value="fast" {% if settings.video_quality != 'hq' %}selected{% endif %}>视频快速</option>
+              <option value="fast" {% if settings.video_quality != 'hq' and settings.video_quality != 'max' %}selected{% endif %}>视频快速</option>
               <option value="hq" {% if settings.video_quality == 'hq' %}selected{% endif %}>视频高质量</option>
+              <option value="max" {% if settings.video_quality == 'max' %}selected{% endif %}>视频保真</option>
             </select>
           </div>
         </div>
