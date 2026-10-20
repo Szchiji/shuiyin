@@ -64,6 +64,10 @@ def _admin_contact() -> str:
 
 # ── Watermark display helpers ─────────────────────────────────────────────────
 
+def _vq_label(q) -> str:
+    return {"hq": "高质量", "max": "保真"}.get(q or "fast", "快速")
+
+
 def _wm_summary(s: dict) -> str:
     type_label = "🖼 图片水印" if s["wm_type"] == "logo" else "📝 文字水印"
     logo_ok = s.get("logo_path") and os.path.exists(s["logo_path"])
@@ -81,7 +85,7 @@ def _wm_summary(s: dict) -> str:
         f"• 颜色：{s.get('text_color') or '#FFFFFF'}",
         f"• 描边：{'开' if s.get('stroke') else '关'}",
         f"• 边距：{s.get('margin', 3)}%",
-        f"• 视频档：{'高质量' if s.get('video_quality') == 'hq' else '快速'}",
+        f"• 视频档：{_vq_label(s.get('video_quality'))}",
     ]
     return "\n".join(lines)
 
@@ -101,7 +105,7 @@ def _settings_kb(s: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(f"🎨 颜色 {s.get('text_color') or '#FFF'}", callback_data="set_color"),
          InlineKeyboardButton(f"🖌 描边: {'开' if s.get('stroke') else '关'}", callback_data="toggle_stroke")],
         [InlineKeyboardButton(f"📏 边距: {s.get('margin', 3)}%", callback_data="set_margin"),
-         InlineKeyboardButton(f"🎞 {'高质量' if s.get('video_quality') == 'hq' else '快速'}", callback_data="set_vq")],
+         InlineKeyboardButton(f"🎞 {_vq_label(s.get('video_quality'))}", callback_data="set_vq")],
         [InlineKeyboardButton("💾 存槽1", callback_data="preset_save_1"),
          InlineKeyboardButton("💾 存槽2", callback_data="preset_save_2"),
          InlineKeyboardButton("💾 存槽3", callback_data="preset_save_3")],
@@ -591,14 +595,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text(f"✅ 边距已设为 {margin}%\n\n{_wm_summary(s)}", reply_markup=_settings_kb(s))
     elif data == "set_vq":
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("快速", callback_data="vq_fast"), InlineKeyboardButton("高质量", callback_data="vq_hq")]
+            [
+                InlineKeyboardButton("快速", callback_data="vq_fast"),
+                InlineKeyboardButton("高质量", callback_data="vq_hq"),
+                InlineKeyboardButton("保真", callback_data="vq_max"),
+            ]
         ])
         await query.edit_message_text("🎞 视频档位：", reply_markup=kb)
     elif data.startswith("vq_"):
-        q = "hq" if data.endswith("hq") else "fast"
+        raw = data[3:]  # fast / hq / max
+        q = raw if raw in {"fast", "hq", "max"} else "fast"
         db.save_watermark_settings(user_id, video_quality=q)
         s = db.get_watermark_settings(user_id)
-        await query.edit_message_text(f"✅ 视频档位：{'高质量' if q == 'hq' else '快速'}\n\n{_wm_summary(s)}", reply_markup=_settings_kb(s))
+        await query.edit_message_text(f"✅ 视频档位：{_vq_label(q)}\n\n{_wm_summary(s)}", reply_markup=_settings_kb(s))
     elif data.startswith("preset_save_"):
         slot = int(data.rsplit("_", 1)[1])
         db.save_preset(user_id, slot)
@@ -786,9 +795,15 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     text = s.get("text", "© Wei")
 
     # ── Process ───────────────────────────────────────────────────────────────
-    wait_text = "⏳ 正在处理视频，快速档通常 1～2 分钟…" if is_video else "⏳ 正在处理，请稍候…"
-    if is_video and s.get("video_quality") == "hq":
-        wait_text = "⏳ 正在处理视频（高质量），请稍候…"
+    wait_text = "⏳ 正在处理，请稍候…"
+    if is_video:
+        vq = s.get("video_quality") or "fast"
+        if vq == "max":
+            wait_text = "⏳ 正在处理视频（保真档，耗时更长，请耐心等待）…"
+        elif vq == "hq":
+            wait_text = "⏳ 正在处理视频（高质量），请稍候…"
+        else:
+            wait_text = "⏳ 正在处理视频，快速档通常 1～2 分钟…"
     msg = await update.message.reply_text(wait_text)
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
