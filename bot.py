@@ -23,7 +23,7 @@ import urllib.parse
 
 import contact
 import db
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.error import TelegramError, TimedOut
 from telegram.ext import (
     Application,
@@ -793,7 +793,7 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, f"input.{ext}")
-            output_ext = "mp4" if is_video else "jpg"
+            output_ext = "mp4" if is_video else ext
             output_path = os.path.join(tmpdir, f"output.{output_ext}")
 
             await tg_file.download_to_drive(input_path)
@@ -856,8 +856,13 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 with open(output_path, "rb") as f:
                     await update.message.reply_video(f, caption=caption_out)
             else:
+                # reply_document avoids Telegram album recompression
+                caption_out = f"{caption_out}\n（原图文件，未走相册压缩）"
                 with open(output_path, "rb") as f:
-                    await update.message.reply_photo(f, caption=caption_out)
+                    await update.message.reply_document(
+                        document=InputFile(f, filename=f"watermarked.{output_ext}"),
+                        caption=caption_out,
+                    )
 
     except TimedOut:
         logger.warning("处理媒体超时")

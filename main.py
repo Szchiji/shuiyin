@@ -714,7 +714,8 @@ async def _add_watermark_batch(
     try:
         for idx, (item, safe_name, ext) in enumerate(prepared, 1):
             input_path = f"uploads/{timestamp}_{idx}_{safe_name}"
-            output_path = f"{out_dir}/{idx:02d}_{pathlib.Path(safe_name).stem}.jpg"
+            out_ext = _image_output_ext(safe_name)
+            output_path = f"{out_dir}/{idx:02d}_{pathlib.Path(safe_name).stem}.{out_ext}"
             with open(input_path, "wb") as buffer:
                 shutil.copyfileobj(item.file, buffer)
             ok = await loop.run_in_executor(
@@ -885,9 +886,8 @@ async def add_watermark(
             # Use saved logo_scale if not explicitly overridden (form default is 20)
             logo_scale = max(5, min(100, saved_s.get("logo_scale", logo_scale)))
 
+    # Images keep source extension (png/webp/jpeg); videos keep mp4/mov
     output_path = f"outputs/watermarked_{u['user_id']}_{timestamp}.{ext}"
-    if ext in ["jpg", "jpeg", "png", "webp"]:
-        output_path = f"outputs/watermarked_{u['user_id']}_{timestamp}.jpg"
 
     loop = asyncio.get_running_loop()
     success = False
@@ -1148,6 +1148,32 @@ def _paint_text_layer(size, text, font, opacity, color, stroke, tiled, position,
     return layer
 
 
+
+def _image_output_ext(input_path) -> str:
+    """Return output extension matching source image format (preserve quality)."""
+    ext = pathlib.Path(input_path).suffix.lstrip(".").lower()
+    if ext in {"jpg", "jpeg", "png", "webp"}:
+        return ext
+    return "jpg"
+
+
+def _save_watermarked_image(img, output_path, input_path):
+    """Save watermarked image in source format; JPEG only converts to RGB."""
+    ext = _image_output_ext(input_path)
+    if ext in ("jpg", "jpeg"):
+        img.convert("RGB").save(
+            output_path, format="JPEG", quality=95, subsampling=0, optimize=True
+        )
+    elif ext == "png":
+        img.save(output_path, format="PNG")
+    elif ext == "webp":
+        img.save(output_path, format="WEBP", quality=95, method=6)
+    else:
+        img.convert("RGB").save(
+            output_path, format="JPEG", quality=95, subsampling=0, optimize=True
+        )
+
+
 def add_watermark_to_image(input_path, output_path, text, position, opacity, tiled, logo_path=None, pos_x=None, pos_y=None, font_size=5, logo_scale=20, text_color="#FFFFFF", stroke=1, margin=3):
     try:
         img = Image.open(input_path).convert("RGBA")
@@ -1184,7 +1210,7 @@ def add_watermark_to_image(input_path, output_path, text, position, opacity, til
             )
             img = Image.alpha_composite(img, layer)
 
-        img.convert("RGB").save(output_path, quality=95)
+        _save_watermarked_image(img, output_path, input_path)
         return True
     except Exception as e:
         print("图片处理错误:", e)
