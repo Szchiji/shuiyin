@@ -68,6 +68,10 @@ def _vq_label(q) -> str:
     return {"hq": "高质量", "max": "保真"}.get(q or "fast", "快速")
 
 
+def _enhance_label(q) -> str:
+    return "轻度锐化" if (q or "light") == "light" else "关闭"
+
+
 def _wm_summary(s: dict) -> str:
     type_label = "🖼 图片水印" if s["wm_type"] == "logo" else "📝 文字水印"
     logo_ok = s.get("logo_path") and os.path.exists(s["logo_path"])
@@ -86,6 +90,7 @@ def _wm_summary(s: dict) -> str:
         f"• 描边：{'开' if s.get('stroke') else '关'}",
         f"• 边距：{s.get('margin', 3)}%",
         f"• 视频档：{_vq_label(s.get('video_quality'))}",
+        f"• 图片增强：{_enhance_label(s.get('image_enhance'))}",
     ]
     return "\n".join(lines)
 
@@ -106,6 +111,7 @@ def _settings_kb(s: dict) -> InlineKeyboardMarkup:
          InlineKeyboardButton(f"🖌 描边: {'开' if s.get('stroke') else '关'}", callback_data="toggle_stroke")],
         [InlineKeyboardButton(f"📏 边距: {s.get('margin', 3)}%", callback_data="set_margin"),
          InlineKeyboardButton(f"🎞 {_vq_label(s.get('video_quality'))}", callback_data="set_vq")],
+        [InlineKeyboardButton(f"✨ 锐化: {_enhance_label(s.get('image_enhance'))}", callback_data="set_enhance")],
         [InlineKeyboardButton("💾 存槽1", callback_data="preset_save_1"),
          InlineKeyboardButton("💾 存槽2", callback_data="preset_save_2"),
          InlineKeyboardButton("💾 存槽3", callback_data="preset_save_3")],
@@ -608,6 +614,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         db.save_watermark_settings(user_id, video_quality=q)
         s = db.get_watermark_settings(user_id)
         await query.edit_message_text(f"✅ 视频档位：{_vq_label(q)}\n\n{_wm_summary(s)}", reply_markup=_settings_kb(s))
+    elif data == "set_enhance":
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("关闭", callback_data="enhance_off"),
+                InlineKeyboardButton("轻度锐化", callback_data="enhance_light"),
+            ]
+        ])
+        await query.edit_message_text("✨ 图片增强（加水印后轻度锐化）：", reply_markup=kb)
+    elif data.startswith("enhance_"):
+        raw = data.split("_", 1)[1]
+        q = raw if raw in {"off", "light"} else "light"
+        db.save_watermark_settings(user_id, image_enhance=q)
+        s = db.get_watermark_settings(user_id)
+        await query.edit_message_text(f"✅ 图片增强：{_enhance_label(q)}\n\n{_wm_summary(s)}", reply_markup=_settings_kb(s))
     elif data.startswith("preset_save_"):
         slot = int(data.rsplit("_", 1)[1])
         db.save_preset(user_id, slot)
@@ -843,6 +863,9 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                         s.get("video_quality") or "fast",
                     )
                 else:
+                    enhance = s.get("image_enhance") or "light"
+                    if enhance not in {"off", "light"}:
+                        enhance = "light"
                     success = await loop.run_in_executor(
                         None,
                         add_watermark_to_image,
@@ -852,6 +875,7 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                         s.get("text_color") or "#FFFFFF",
                         int(s.get("stroke", 1) or 0),
                         int(s.get("margin", 3) or 3),
+                        enhance,
                     )
             finally:
                 stop_tick = True
@@ -872,7 +896,11 @@ async def _apply_watermark(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     await update.message.reply_video(f, caption=caption_out)
             else:
                 # reply_document avoids Telegram album recompression
-                caption_out = f"{caption_out}\n（原图文件，未走相册压缩）"
+                enhance = s.get("image_enhance") or "light"
+                notes = ["原图文件，未走相册压缩"]
+                if enhance == "light":
+                    notes.append("已轻度锐化")
+                caption_out = f"{caption_out}\n（{'，'.join(notes)}）"
                 with open(output_path, "rb") as f:
                     await update.message.reply_document(
                         document=InputFile(f, filename=f"watermarked.{output_ext}"),

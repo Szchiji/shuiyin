@@ -409,7 +409,7 @@
           <p class="hint">可换行。只对还没保存过个人模板的用户生效。</p>
         </div>
         <div class="field">
-          <label>默认颜色 / 描边 / 边距 / 视频档</label>
+          <label>默认颜色 / 描边 / 边距 / 视频档 / 锐化</label>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
             <input type="color" name="default_text_color" value="{{ sys_settings.default_text_color or '#FFFFFF' }}" />
             <label class="checkbox-row" style="margin:0;">
@@ -420,6 +420,10 @@
               <option value="fast" {% if sys_settings.default_video_quality != 'hq' and sys_settings.default_video_quality != 'max' %}selected{% endif %}>视频快速</option>
               <option value="hq" {% if sys_settings.default_video_quality == 'hq' %}selected{% endif %}>视频高质量</option>
               <option value="max" {% if sys_settings.default_video_quality == 'max' %}selected{% endif %}>视频保真</option>
+            </select>
+            <select name="default_image_enhance" title="图片增强">
+              <option value="light" {% if sys_settings.default_image_enhance != 'off' %}selected{% endif %}>轻度锐化</option>
+              <option value="off" {% if sys_settings.default_image_enhance == 'off' %}selected{% endif %}>不锐化</option>
             </select>
           </div>
         </div>
